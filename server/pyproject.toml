@@ -10,4 +10,8 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=15.0.1",
     "python-dotenv>=1.2.1",
     "uvicorn[standard]>=0.38.0",
+    "ydata-profiling>=4.17.0",
+    "openai>=2.6.1",
+    "setuptools>=80.9.0",
 ]
+

@@ -1,7 +1,7 @@
 import robotIcon from '../assets/robot-svgrepo-com.svg'
 import userIcon from '../assets/user-svgrepo-com.svg'
 
-export function ChatMessage({ message, isUser = false }) {
+export function ChatMessage({ message, isUser = false, isLoading = false }) {
   return (
     <div className={`flex items-start gap-3 mb-6 ${isUser ? 'flex-row-reverse' : ''}`}>
       {/* Avatar */}
@@ -15,15 +15,25 @@ export function ChatMessage({ message, isUser = false }) {
       
       {/* Message content */}
       <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-3xl`}>
-        <div className={`rounded-2xl px-4 py-3 ${
-          isUser 
-            ? 'bg-purple-100 text-gray-800' 
-            : 'bg-white text-gray-800'
-        } shadow-sm`}>
-          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
-            {message}
-          </p>
-        </div>
+        {!isLoading ? (
+          <div className={`rounded-2xl px-4 py-3 ${
+            isUser 
+              ? 'bg-purple-100 text-gray-800' 
+              : 'bg-white text-gray-800'
+          } shadow-sm`}>
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+              {message}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-2xl px-4 py-3 bg-white shadow-sm">
+            <div className="flex gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+          </div>
+        )}
         
         {/* Interactive icons for AI messages */}
         {!isUser && (

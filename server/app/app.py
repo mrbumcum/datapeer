@@ -6,10 +6,17 @@ import csv
 from pathlib import Path
 from pydantic import BaseModel
 from . import database
+from . import llm_analysis
 
 
 class SelectionUpdate(BaseModel):
     is_selected: bool
+
+
+class ChatMessage(BaseModel):
+    message: str
+    analysis_type: str  # 'qualitative' or 'quantitative'
+    selected_file_ids: list[int] = []
 
 app = FastAPI()
 
@@ -180,3 +187,61 @@ async def preview_csv_file(file_id: int, rows: int = Query(default=20, ge=1, le=
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error previewing file: {str(e)}")
+
+
+@app.post("/api/chat")
+async def chat_with_llm(chat_request: ChatMessage):
+    """Process user message with LLM analysis based on selected datasets"""
+    try:
+        # Validate analysis type
+        if chat_request.analysis_type not in ['qualitative', 'quantitative']:
+            raise HTTPException(status_code=400, detail="analysis_type must be 'qualitative' or 'quantitative'")
+        
+        # Currently only implementing qualitative
+        if chat_request.analysis_type != 'qualitative':
+            raise HTTPException(status_code=400, detail="Quantitative analysis not yet implemented. Please use qualitative.")
+        
+        # Get selected files
+        if not chat_request.selected_file_ids:
+            raise HTTPException(status_code=400, detail="No files selected. Please select at least one dataset.")
+        
+        # Fetch file records from database
+        all_files = await database.get_all_files()
+        selected_files = [
+            f for f in all_files 
+            if f["id"] in chat_request.selected_file_ids
+        ]
+        
+        if not selected_files:
+            raise HTTPException(status_code=404, detail="Selected files not found")
+        
+        # Validate files exist on disk
+        file_paths = []
+        file_names = []
+        for file_record in selected_files:
+            file_path = Path(file_record["file_path"])
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File {file_record['filename']} not found on disk")
+            file_paths.append(str(file_path))
+            file_names.append(file_record["filename"])
+        
+        # Perform qualitative analysis
+        if chat_request.analysis_type == 'qualitative':
+            response_text = await llm_analysis.analyze_with_llm_qualitative(
+                user_message=chat_request.message,
+                file_paths=file_paths,
+                file_names=file_names
+            )
+            
+            return {
+                "response": response_text,
+                "analysis_type": chat_request.analysis_type,
+                "files_analyzed": file_names
+            }
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
