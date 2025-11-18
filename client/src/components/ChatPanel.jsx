@@ -170,11 +170,13 @@ export function ChatPanel() {
         </div>
 
         {/* Analysis column */}
-        <QuantitativeInsights
-          quantAnalysis={quantAnalysis}
-          selectedFiles={selectedFiles}
-          isLoading={isLoading && analysisType === 'quantitative'}
-        />
+        {analysisType === 'quantitative' && (
+          <QuantitativeInsights
+            quantAnalysis={quantAnalysis}
+            selectedFiles={selectedFiles}
+            isLoading={isLoading}
+          />
+        )}
       </div>
     </div>
   )
