@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChatMessages } from './ChatMessages'
 import { ChatBar } from './ChatBar'
-import { CodeBlock } from './CodeBlock'
-import { DataOutputPanel } from './DataOutputPanel'
-import { CsvPreviewPanel } from './CsvPreviewPanel'
+import { QuantitativeInsights } from './QuantitativeInsights'
 
 const API_BASE_URL = 'http://localhost:8000'
 
@@ -172,27 +170,11 @@ export function ChatPanel() {
         </div>
 
         {/* Analysis column */}
-        <div className="w-full lg:w-5/12 flex flex-col gap-4 min-h-0 overflow-hidden">
-          <CodeBlock
-            code={quantAnalysis.code}
-            explanation={quantAnalysis.explanation}
-            isLoading={isLoading && analysisType === 'quantitative'}
-            updatedAt={quantAnalysis.updatedAt}
-          />
-
-          <DataOutputPanel
-            responseText={quantAnalysis.summary}
-            dataOutput={quantAnalysis.dataOutput}
-            files={quantAnalysis.files}
-            codeSuccess={quantAnalysis.codeSuccess}
-            codeError={quantAnalysis.codeError}
-            isLoading={isLoading && analysisType === 'quantitative'}
-          />
-
-          <div className="flex-1 overflow-hidden">
-            <CsvPreviewPanel selectedFiles={selectedFiles} />
-          </div>
-        </div>
+        <QuantitativeInsights
+          quantAnalysis={quantAnalysis}
+          selectedFiles={selectedFiles}
+          isLoading={isLoading && analysisType === 'quantitative'}
+        />
       </div>
     </div>
   )
