@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ChatMessages } from './ChatMessages'
 import { ChatBar } from './ChatBar'
+import { CodeBlock } from './CodeBlock'
+import { DataOutputPanel } from './DataOutputPanel'
+import { CsvPreviewPanel } from './CsvPreviewPanel'
 
 const API_BASE_URL = 'http://localhost:8000'
 
@@ -8,6 +11,39 @@ export function ChatPanel() {
   const [messages, setMessages] = useState([])
   const [analysisType, setAnalysisType] = useState('qualitative')
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedFiles, setSelectedFiles] = useState([])
+  const [quantAnalysis, setQuantAnalysis] = useState({
+    code: '',
+    explanation: '',
+    dataOutput: '',
+    summary: '',
+    files: [],
+    codeSuccess: null,
+    codeError: null,
+    updatedAt: null
+  })
+
+  const fetchSelectedFiles = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/files/selected`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch selected files')
+      }
+      const data = await response.json()
+      const files = data.files || []
+      setSelectedFiles(files)
+      return files
+    } catch (error) {
+      console.error('Error fetching selected files:', error)
+      return []
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSelectedFiles()
+    const interval = setInterval(fetchSelectedFiles, 20000)
+    return () => clearInterval(interval)
+  }, [fetchSelectedFiles])
 
   const handleSendMessage = async (text) => {
     const newMessage = {
@@ -19,30 +55,11 @@ export function ChatPanel() {
     setIsLoading(true)
     
     try {
-      // Fetch selected files
-      const filesResponse = await fetch(`${API_BASE_URL}/api/files/selected`)
-      if (!filesResponse.ok) {
-        throw new Error('Failed to fetch selected files')
-      }
+      const latestSelectedFiles = await fetchSelectedFiles()
       
-      const filesData = await filesResponse.json()
-      const selectedFiles = filesData.files || []
-      
-      if (selectedFiles.length === 0) {
+      if (latestSelectedFiles.length === 0) {
         const errorMessage = {
           text: "Please select at least one dataset from the Database page before asking questions.",
-          isUser: false,
-          role: 'assistant'
-        }
-        setMessages(prev => [...prev, errorMessage])
-        setIsLoading(false)
-        return
-      }
-      
-      // Only proceed if qualitative is selected (as requested)
-      if (analysisType !== 'qualitative') {
-        const errorMessage = {
-          text: "Quantitative analysis is not yet implemented. Please use qualitative analysis.",
           isUser: false,
           role: 'assistant'
         }
@@ -60,7 +77,7 @@ export function ChatPanel() {
         body: JSON.stringify({
           message: text,
           analysis_type: analysisType,
-          selected_file_ids: selectedFiles.map(f => f.id)
+          selected_file_ids: latestSelectedFiles.map(f => f.id)
         })
       })
       
@@ -76,6 +93,19 @@ export function ChatPanel() {
         role: 'assistant'
       }
       setMessages(prev => [...prev, aiResponse])
+
+      if (chatData.analysis_type === 'quantitative') {
+        setQuantAnalysis({
+          code: chatData.code || '',
+          explanation: chatData.code_explanation || '',
+          dataOutput: chatData.data_output || '',
+          summary: chatData.response || '',
+          files: chatData.files_analyzed || [],
+          codeSuccess: chatData.code_success ?? null,
+          codeError: chatData.code_error || null,
+          updatedAt: new Date().toISOString()
+        })
+      }
       
     } catch (error) {
       console.error('Error sending message:', error)
@@ -91,9 +121,9 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-gradient-to-b from-blue-50 to-purple-50 min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-linear-to-b from-blue-50 to-purple-50 min-h-0 overflow-hidden">
       {/* Toggle switch for analysis type */}
-      <div className="flex justify-center pt-6 pb-4 flex-shrink-0">
+      <div className="flex justify-center pt-6 pb-4 shrink-0">
         <div className="inline-flex rounded-lg border border-gray-300 bg-white overflow-hidden shadow-sm">
           {/* Qualitative option */}
           <button
@@ -134,11 +164,36 @@ export function ChatPanel() {
         </div>
       </div>
 
-      {/* Main chat area */}
-      <ChatMessages messages={messages} isLoading={isLoading} />
-      
-      {/* Chat input bar */}
-      <ChatBar onSendMessage={handleSendMessage} disabled={isLoading} />
+      <div className="flex-1 flex flex-col lg:flex-row gap-4 px-4 pb-6 overflow-hidden">
+        {/* Chat column */}
+        <div className="flex flex-col flex-1 min-h-0 bg-transparent rounded-3xl">
+          <ChatMessages messages={messages} isLoading={isLoading} />
+          <ChatBar onSendMessage={handleSendMessage} disabled={isLoading} />
+        </div>
+
+        {/* Analysis column */}
+        <div className="w-full lg:w-5/12 flex flex-col gap-4 min-h-0 overflow-hidden">
+          <CodeBlock
+            code={quantAnalysis.code}
+            explanation={quantAnalysis.explanation}
+            isLoading={isLoading && analysisType === 'quantitative'}
+            updatedAt={quantAnalysis.updatedAt}
+          />
+
+          <DataOutputPanel
+            responseText={quantAnalysis.summary}
+            dataOutput={quantAnalysis.dataOutput}
+            files={quantAnalysis.files}
+            codeSuccess={quantAnalysis.codeSuccess}
+            codeError={quantAnalysis.codeError}
+            isLoading={isLoading && analysisType === 'quantitative'}
+          />
+
+          <div className="flex-1 overflow-hidden">
+            <CsvPreviewPanel selectedFiles={selectedFiles} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

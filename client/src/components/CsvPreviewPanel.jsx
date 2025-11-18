@@ -73,7 +73,7 @@ export function CsvPreviewPanel({ selectedFiles }) {
 
   if (selectedFiles.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-md p-6">
+      <div className="bg-white rounded-lg shadow-md p-6 h-full flex flex-col">
         <h2 className="text-xl font-semibold text-gray-800 mb-2">Selected CSV Files Preview</h2>
         <p className="text-gray-500 text-sm">No files selected. Check files above to preview their contents.</p>
       </div>
@@ -81,7 +81,7 @@ export function CsvPreviewPanel({ selectedFiles }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-white rounded-lg shadow-md p-6 h-full flex flex-col">
       <h2 className="text-xl font-semibold text-gray-800 mb-4">
         Selected CSV Files Preview
         <span className="ml-2 text-sm font-normal text-gray-600">
@@ -89,7 +89,7 @@ export function CsvPreviewPanel({ selectedFiles }) {
         </span>
       </h2>
       
-      <div className="space-y-6">
+      <div className="space-y-6 flex-1 overflow-y-auto pr-1">
         {selectedFiles.map((file) => {
           const preview = previews[file.id]
           const isLoading = loading[file.id]
@@ -121,7 +121,7 @@ export function CsvPreviewPanel({ selectedFiles }) {
               </div>
 
               {/* Preview Content */}
-              <div className="overflow-x-auto max-h-96">
+              <div className="overflow-x-auto max-h-72">
                 {isLoading && (
                   <div className="p-8 text-center text-gray-500">
                     Loading preview...
