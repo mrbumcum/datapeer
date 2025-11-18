@@ -1,8 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-import io
-from pathlib import Path
+import json
 from ydata_profiling import ProfileReport
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -54,6 +53,43 @@ Qualitative Analysis Methods Available:
 
 IMPORTANT: These methods can be applied to quantitative datasets. For example, thematic analysis of voting data means identifying themes like "swing states", "regional voting patterns", "demographic trends", etc. When asked for thematic analysis, identify meaningful themes and patterns in the data itself.
 """
+
+
+def _prepare_dataframe_context(file_paths: list[str], file_names: list[str]):
+    """
+    Load CSV files into pandas DataFrames and return shared context structures.
+    
+    Returns:
+        tuple of (dataframes_dict, metadata_dict, dataset_summary_str)
+    """
+    dataframes = {}
+    dataframe_info = {}
+    summary_lines = []
+    
+    for idx, (file_path, file_name) in enumerate(zip(file_paths, file_names)):
+        df = pd.read_csv(file_path)
+        base_name = file_name.replace('.csv', '').lower()
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', base_name)
+        safe_name = re.sub(r'_+', '_', safe_name).strip('_')
+        
+        if len(file_paths) > 1:
+            safe_name = f"df{idx+1}_{safe_name[:30]}"
+        else:
+            safe_name = f"df_{safe_name[:30]}"
+        
+        dataframes[safe_name] = df
+        dataframe_info[safe_name] = {
+            "filename": file_name,
+            "rows": len(df),
+            "columns": list(df.columns),
+            "shape": df.shape
+        }
+        summary_lines.append(
+            f"- {safe_name}: {file_name} ({len(df)} rows, {df.shape[1]} columns: {', '.join(list(df.columns)[:10])})"
+        )
+    
+    dataset_summary = "Available datasets:\n" + "\n".join(summary_lines)
+    return dataframes, dataframe_info, dataset_summary
 
 
 async def generate_data_profile(file_path: str) -> dict:
@@ -377,34 +413,7 @@ async def analyze_with_llm_qualitative(
             return response.choices[0].message.content
         
         # Load full datasets into pandas DataFrames (fast, server-side)
-        dataframes = {}
-        dataframe_info = {}
-        
-        for idx, (file_path, file_name) in enumerate(zip(file_paths, file_names)):
-            df = pd.read_csv(file_path)
-            # Create safe variable name from filename (shorter, cleaner)
-            base_name = file_name.replace('.csv', '').lower()
-            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', base_name)
-            safe_name = re.sub(r'_+', '_', safe_name).strip('_')
-            
-            # If multiple files, add index for clarity
-            if len(file_paths) > 1:
-                safe_name = f"df{idx+1}_{safe_name[:30]}"  # Limit length
-            else:
-                safe_name = f"df_{safe_name[:30]}"  # Still prefix with df for clarity
-            
-            dataframes[safe_name] = df
-            dataframe_info[safe_name] = {
-                'filename': file_name,
-                'rows': len(df),
-                'columns': list(df.columns),
-                'shape': df.shape
-            }
-        
-        # Build concise dataset summary (not full data)
-        dataset_summary = "Available datasets:\n"
-        for name, info in dataframe_info.items():
-            dataset_summary += f"- {name}: {info['filename']} ({info['rows']} rows, {info['shape'][1]} columns: {', '.join(info['columns'][:10])})\n"
+        dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
         
         # Define function for code execution
         tools = [
@@ -554,4 +563,148 @@ Answer naturally - don't force templates. NEVER refuse to do thematic analysis o
         
     except Exception as e:
         raise Exception(f"Error in LLM analysis: {str(e)}")
+
+
+async def analyze_with_llm_quantitative(
+    user_message: str,
+    file_paths: list[str],
+    file_names: list[str]
+) -> dict:
+    """
+    Perform quantitative/EDA analysis using LLM-generated Python code.
+    
+    Returns dictionary with response text, code, output, and execution metadata.
+    """
+    try:
+        dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
+        
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "execute_analysis_code",
+                    "description": "Execute pandas/numpy code against the loaded CSV dataframes. Use print() to show tabular results or summaries.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "code": {
+                                "type": "string",
+                                "description": "Executable Python code that references provided dataframe names."
+                            },
+                            "explanation": {
+                                "type": "string",
+                                "description": "A short explanation of the analysis the code performs."
+                            }
+                        },
+                        "required": ["code", "explanation"]
+                    }
+                }
+            }
+        ]
+        
+        system_prompt = f"""You are a senior data scientist performing exploratory quantitative analysis.
+You have server-side access to complete datasets loaded as pandas DataFrames with these names:
+{dataset_summary}
+
+Follow this workflow:
+1. Read the user's quantitative question carefully.
+2. Devise a concise pandas analysis plan (group-bys, aggregations, descriptive stats, etc.).
+3. Call execute_analysis_code with clean, reproducible Python code that:
+   - Imports are unnecessary (pd/np already provided)
+   - Uses print() to show findings and tables
+   - Avoids long triple-quoted strings
+4. After seeing the tool output, explain the findings in natural language, referencing concrete numbers.
+
+Always call execute_analysis_code at least once before giving your final answer.
+If code execution fails, inspect the error, adjust the code, and try again.
+Keep responses focused on EDA insights (trends, comparisons, distributions)."""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+        
+        last_code = None
+        last_explanation = ""
+        last_output = ""
+        last_success = False
+        last_error = None
+        
+        max_iterations = 6
+        for _ in range(max_iterations):
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.3,
+                max_tokens=1800
+            )
+            
+            message = response.choices[0].message
+            message_dict = {
+                "role": message.role,
+                "content": message.content
+            }
+            
+            if message.tool_calls:
+                message_dict["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in message.tool_calls
+                ]
+            
+            messages.append(message_dict)
+            
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    if tool_call.function.name != "execute_analysis_code":
+                        continue
+                    
+                    function_args = json.loads(tool_call.function.arguments)
+                    code = function_args.get("code", "")
+                    explanation = function_args.get("explanation", "")
+                    
+                    output, success = await execute_safe_code(code, dataframes)
+                    last_code = code
+                    last_explanation = explanation
+                    last_output = output
+                    last_success = success
+                    last_error = None if success else output
+                    
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Code executed successfully:\n{output}" if success else f"Code execution failed:\n{output}"
+                    }
+                    messages.append(tool_message)
+                continue
+            
+            final_content = message.content or "Analysis complete."
+            return {
+                "response": final_content,
+                "code": last_code,
+                "code_explanation": last_explanation,
+                "data_output": last_output,
+                "code_success": last_success,
+                "code_error": last_error if not last_success else None
+            }
+        
+        return {
+            "response": "Analysis completed.",
+            "code": last_code,
+            "code_explanation": last_explanation,
+            "data_output": last_output,
+            "code_success": last_success,
+            "code_error": last_error if not last_success else None
+        }
+    
+    except Exception as e:
+        raise Exception(f"Error in quantitative LLM analysis: {str(e)}")
 

@@ -197,10 +197,6 @@ async def chat_with_llm(chat_request: ChatMessage):
         if chat_request.analysis_type not in ['qualitative', 'quantitative']:
             raise HTTPException(status_code=400, detail="analysis_type must be 'qualitative' or 'quantitative'")
         
-        # Currently only implementing qualitative
-        if chat_request.analysis_type != 'qualitative':
-            raise HTTPException(status_code=400, detail="Quantitative analysis not yet implemented. Please use qualitative.")
-        
         # Get selected files
         if not chat_request.selected_file_ids:
             raise HTTPException(status_code=400, detail="No files selected. Please select at least one dataset.")
@@ -225,7 +221,7 @@ async def chat_with_llm(chat_request: ChatMessage):
             file_paths.append(str(file_path))
             file_names.append(file_record["filename"])
         
-        # Perform qualitative analysis
+        # Perform analysis per requested type
         if chat_request.analysis_type == 'qualitative':
             response_text = await llm_analysis.analyze_with_llm_qualitative(
                 user_message=chat_request.message,
@@ -237,6 +233,23 @@ async def chat_with_llm(chat_request: ChatMessage):
                 "response": response_text,
                 "analysis_type": chat_request.analysis_type,
                 "files_analyzed": file_names
+            }
+        else:
+            quant_result = await llm_analysis.analyze_with_llm_quantitative(
+                user_message=chat_request.message,
+                file_paths=file_paths,
+                file_names=file_names
+            )
+            
+            return {
+                "response": quant_result.get("response"),
+                "analysis_type": chat_request.analysis_type,
+                "files_analyzed": file_names,
+                "code": quant_result.get("code"),
+                "code_explanation": quant_result.get("code_explanation"),
+                "data_output": quant_result.get("data_output"),
+                "code_success": quant_result.get("code_success"),
+                "code_error": quant_result.get("code_error")
             }
         
     except HTTPException:
