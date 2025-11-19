@@ -161,6 +161,81 @@ async def generate_data_profile(file_path: str) -> dict:
         raise Exception(f"Error generating profile: {str(e)}")
 
 
+def _format_number(value: float) -> str:
+    """Consistently format numeric values for qualitative summaries."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return "N/A"
+    try:
+        float_value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if abs(float_value) >= 1000 or float_value.is_integer():
+        return f"{float_value:,.0f}"
+    return f"{float_value:,.2f}".rstrip("0").rstrip(".")
+
+
+def _summarize_numeric_column(series: pd.Series, column_name: str) -> str | None:
+    """Create a compact textual summary for numeric columns."""
+    numeric_series = pd.to_numeric(series, errors='coerce').dropna()
+    if numeric_series.empty:
+        return None
+    desc = numeric_series.describe()
+    quantiles = numeric_series.quantile([0.25, 0.5, 0.75])
+    highs = numeric_series.sort_values(ascending=False).head(3).tolist()
+    lows = numeric_series.sort_values(ascending=True).head(3).tolist()
+    return (
+        f"{column_name}: mean { _format_number(desc['mean']) }, "
+        f"median { _format_number(quantiles.loc[0.5]) }, "
+        f"range { _format_number(desc['min']) } → { _format_number(desc['max']) }. "
+        f"Highest values around {', '.join(_format_number(v) for v in highs)}; "
+        f"lowest around {', '.join(_format_number(v) for v in lows)}."
+    )
+
+
+def _summarize_categorical_column(series: pd.Series, column_name: str) -> str | None:
+    """Create qualitative summary text for categorical columns."""
+    cleaned = series.dropna().astype(str)
+    if cleaned.empty:
+        return None
+    value_counts = cleaned.value_counts().head(5)
+    total_unique = cleaned.nunique()
+    top_values = ", ".join(
+        f"{val} ({count})" for val, count in value_counts.items()
+    )
+    return (
+        f"{column_name}: {total_unique} unique values. "
+        f"Most common → {top_values}."
+    )
+
+
+def _build_qualitative_context(dataframes: dict[str, pd.DataFrame]) -> str:
+    """Generate qualitative-friendly summaries for every dataframe."""
+    sections: list[str] = []
+    for df_name, df in dataframes.items():
+        lines = [
+            f"Dataset {df_name}: {len(df)} rows, {len(df.columns)} columns.",
+            "Column highlights:"
+        ]
+        column_insights: list[str] = []
+        for column in df.columns:
+            series = df[column]
+            if pd.api.types.is_numeric_dtype(series):
+                summary = _summarize_numeric_column(series, column)
+            else:
+                summary = _summarize_categorical_column(series, column)
+            if summary:
+                column_insights.append(f"- {summary}")
+        if column_insights:
+            lines.extend(column_insights[:8])  # keep context concise
+        else:
+            lines.append("- No column insights available.")
+        sample_rows = df.head(3).to_dict('records')
+        sample_text = json.dumps(sample_rows, default=str)[:800]
+        lines.append(f"Sample rows (truncated): {sample_text}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
 async def classify_message(user_message: str) -> str:
     """
     Classify the user message into one of three categories:
@@ -412,154 +487,48 @@ async def analyze_with_llm_qualitative(
             
             return response.choices[0].message.content
         
-        # Load full datasets into pandas DataFrames (fast, server-side)
-        dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
+        # Load datasets and build qualitative summaries (no tool execution needed)
+        dataframes, _, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
+        qualitative_context = _build_qualitative_context(dataframes)
         
-        # Define function for code execution
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "execute_analysis_code",
-                    "description": "Execute Python code to analyze the datasets. Use pandas (pd) to work with the dataframes. The dataframes are loaded with safe names based on filenames. Return results using print() statements.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "Python code to execute. Use print() to output results. DataFrames are available with names like 'democratic_vs_republican_votes_by_usa_state_2020' (based on filename)."
-                            },
-                            "explanation": {
-                                "type": "string",
-                                "description": "Brief explanation of what the code does"
-                            }
-                        },
-                        "required": ["code", "explanation"]
-                    }
-                }
-            }
-        ]
-        
-        # Build the prompt
-        system_prompt = f"""You are an expert data analyst specializing in qualitative research methods. 
-Your role is to help users understand their datasets through qualitative analysis techniques.
+        system_prompt = f"""You are an expert data analyst specializing in qualitative research methods.
+Your job is to interpret structured dataset summaries and craft narrative, theme-based findings.
 
 {QUALITATIVE_METHODS_DESCRIPTION}
 
-CRITICAL: When a user asks for "thematic analysis" or similar qualitative analysis of quantitative data:
-- This is VALID and EXPECTED - qualitative methods can analyze patterns/themes in quantitative datasets
-- Thematic analysis of voting data means identifying themes like: swing states, regional patterns, demographic trends, party strongholds, etc.
-- DO NOT refuse or suggest alternatives - instead, perform the analysis by identifying themes and patterns in the data
-- Use code execution to analyze the data and identify these themes
-- Present your findings as themes/patterns you've identified
+Guidelines:
+- Treat numeric trends as qualitative stories (e.g., "emerging regions", "outlier segments").
+- Always cite evidence from the provided summaries (column names, relative magnitudes, notable values).
+- Highlight at least three insights, each with a short explanation of why it matters.
+- Mention relevant limitations or missing context if the data cannot fully answer the question.
+- Stay natural and conversational—avoid rigid templates."""
+        
+        user_prompt = f"""User request:
+{user_message}
 
-IMPORTANT INSTRUCTIONS:
-1. When the user asks for analysis (thematic, content, pattern analysis, etc.):
-   - Use the execute_analysis_code function to write and run Python/pandas code
-   - The full datasets are loaded server-side - you have access to ALL rows, not just samples
-   - Write code that performs the actual calculation/analysis
-   - Use print() statements to output your results
-   - For thematic analysis: identify themes in the data (e.g., swing states theme, regional patterns theme, etc.)
-   
-2. After executing code and seeing results:
-   - Present the results clearly to the user
-   - Frame quantitative patterns as qualitative themes when appropriate
-   - Explain your methodology if asked
-   - Be natural and conversational
-   
-3. Available dataframes (use these variable names in your code):
+Dataset overview:
 {dataset_summary}
 
-4. Example code structure:
-   - Calculate swing states: analyze vote margins
-   - Filter data: df[df['column'] > value]
-   - Aggregate: df.groupby('column').sum()
-   - Print results: print(df.head()), print(list_of_states), etc.
+Detailed qualitative context:
+{qualitative_context}
 
-IMPORTANT CODE WRITING RULES:
-- Write complete, valid Python code
-- Use print() statements to output results
-- Don't use line continuation characters (\\) unnecessarily
-- Make sure all strings are properly closed
-- Use simple, straightforward code - avoid complex nested structures
-- Test your logic mentally before writing the code
-
-Answer naturally - don't force templates. NEVER refuse to do thematic analysis on quantitative data - instead, identify themes and patterns in the data itself."""
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ]
+Please respond with qualitative analysis that:
+1. Directly answers the user's question.
+2. Names each key theme and describes the supporting evidence.
+3. Explains implications or recommended next questions.
+4. Notes any data gaps or assumptions when appropriate."""
         
-        # Iterative conversation with code execution
-        max_iterations = 5
-        for iteration in range(max_iterations):
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=0.7,
-                max_tokens=2000
-            )
-            
-            message = response.choices[0].message
-            
-            # Convert message to dict format for messages list
-            message_dict = {
-                "role": message.role,
-                "content": message.content
-            }
-            
-            # Add tool calls if present
-            if message.tool_calls:
-                message_dict["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    }
-                    for tc in message.tool_calls
-                ]
-            
-            messages.append(message_dict)
-            
-            # Check if LLM wants to execute code
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
-                    if tool_call.function.name == "execute_analysis_code":
-                        import json
-                        function_args = json.loads(tool_call.function.arguments)
-                        code = function_args.get("code", "")
-                        explanation = function_args.get("explanation", "")
-                        
-                        # Execute the code
-                        output, success = await execute_safe_code(code, dataframes)
-                        
-                        # Add function result to conversation
-                        tool_message = {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": f"Code executed successfully:\n{output}" if success else f"Code execution failed:\n{output}"
-                        }
-                        messages.append(tool_message)
-                continue  # Continue loop to get LLM's response with results
-            
-            # No tool calls - LLM is ready to respond
-            if message.content:
-                return message.content
-            else:
-                # Fallback if no content
-                return "Analysis completed. Please rephrase your question if you need more information."
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.6,
+            max_tokens=1800
+        )
         
-        # Fallback if max iterations reached
-        last_message = messages[-1] if messages else None
-        if last_message and isinstance(last_message, dict):
-            return last_message.get("content", "Analysis completed.")
-        return "Analysis completed."
+        return response.choices[0].message.content.strip()
         
     except Exception as e:
         raise Exception(f"Error in LLM analysis: {str(e)}")
