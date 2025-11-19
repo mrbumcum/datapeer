@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 import json
-from ydata_profiling import ProfileReport
 from openai import OpenAI
 from dotenv import load_dotenv
 import re
@@ -105,6 +104,12 @@ async def generate_data_profile(file_path: str) -> dict:
     try:
         # Read the CSV file
         df = pd.read_csv(file_path)
+
+        # Import here to avoid loading heavy dependency unless needed
+        try:
+            from ydata_profiling import ProfileReport
+        except Exception as exc:
+            raise RuntimeError("ydata-profiling is required to generate data profiles") from exc
         
         # Generate profile report for additional insights
         profile = ProfileReport(df, title="Data Profile", minimal=True)
