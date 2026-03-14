@@ -1,0 +1,9 @@
+aiosqlite
+fastapi
+uvicorn[standard]
+pydantic
+pandas
+numpy
+openai
+python-dotenv
+ydata-profiling
