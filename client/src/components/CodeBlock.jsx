@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
-import Highlight, { defaultProps } from 'prism-react-renderer'
-import theme from 'prism-react-renderer/themes/nightOwl'
+import { Highlight, themes } from 'prism-react-renderer'
 
 export function CodeBlock({
   code = '',
@@ -63,10 +62,9 @@ export function CodeBlock({
       <div className="relative">
         {hasCode ? (
           <Highlight
-            {...defaultProps}
             code={code}
             language={language}
-            theme={theme}
+            theme={themes.nightOwl}
           >
             {({ className, style, tokens, getLineProps, getTokenProps }) => (
               <pre className={`${className} text-sm overflow-x-auto p-4`} style={{ ...style, margin: 0 }}>
