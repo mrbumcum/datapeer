@@ -1,122 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { ChatMessages } from './ChatMessages'
 import { ChatBar } from './ChatBar'
 import { QuantitativeInsights } from './QuantitativeInsights'
-
-const API_BASE_URL = 'http://localhost:8000'
+import { useChat } from '../contexts/ChatContext'
 
 export function ChatPanel() {
-  const [messages, setMessages] = useState([])
-  const [analysisType, setAnalysisType] = useState('qualitative')
-  const [isLoading, setIsLoading] = useState(false)
-  const [selectedFiles, setSelectedFiles] = useState([])
-  const [quantAnalysis, setQuantAnalysis] = useState({
-    code: '',
-    explanation: '',
-    dataOutput: '',
-    summary: '',
-    files: [],
-    codeSuccess: null,
-    codeError: null,
-    updatedAt: null
-  })
-
-  const fetchSelectedFiles = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/files/selected`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch selected files')
-      }
-      const data = await response.json()
-      const files = data.files || []
-      setSelectedFiles(files)
-      return files
-    } catch (error) {
-      console.error('Error fetching selected files:', error)
-      return []
-    }
-  }, [])
+  const {
+    messages,
+    analysisType,
+    setAnalysisType,
+    quantAnalysis,
+    selectedFiles,
+    isLoading,
+    fetchSelectedFiles,
+    handleSendMessage
+  } = useChat()
 
   useEffect(() => {
     fetchSelectedFiles()
     const interval = setInterval(fetchSelectedFiles, 20000)
     return () => clearInterval(interval)
   }, [fetchSelectedFiles])
-
-  const handleSendMessage = async (text) => {
-    const newMessage = {
-      text,
-      isUser: true,
-      role: 'user'
-    }
-    setMessages(prev => [...prev, newMessage])
-    setIsLoading(true)
-    
-    try {
-      const latestSelectedFiles = await fetchSelectedFiles()
-      
-      if (latestSelectedFiles.length === 0) {
-        const errorMessage = {
-          text: "Please select at least one dataset from the Database page before asking questions.",
-          isUser: false,
-          role: 'assistant'
-        }
-        setMessages(prev => [...prev, errorMessage])
-        setIsLoading(false)
-        return
-      }
-      
-      // Send message to backend with selected files
-      const chatResponse = await fetch(`${API_BASE_URL}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: text,
-          analysis_type: analysisType,
-          selected_file_ids: latestSelectedFiles.map(f => f.id)
-        })
-      })
-      
-      if (!chatResponse.ok) {
-        const errorData = await chatResponse.json().catch(() => ({}))
-        throw new Error(errorData.detail || 'Failed to get response from server')
-      }
-      
-      const chatData = await chatResponse.json()
-      const aiResponse = {
-        text: chatData.response || "No response received",
-        isUser: false,
-        role: 'assistant'
-      }
-      setMessages(prev => [...prev, aiResponse])
-
-      if (chatData.analysis_type === 'quantitative') {
-        setQuantAnalysis({
-          code: chatData.code || '',
-          explanation: chatData.code_explanation || '',
-          dataOutput: chatData.data_output || '',
-          summary: chatData.response || '',
-          files: chatData.files_analyzed || [],
-          codeSuccess: chatData.code_success ?? null,
-          codeError: chatData.code_error || null,
-          updatedAt: new Date().toISOString()
-        })
-      }
-      
-    } catch (error) {
-      console.error('Error sending message:', error)
-      const errorMessage = {
-        text: `Error: ${error.message || 'Failed to process your message. Please try again.'}`,
-        isUser: false,
-        role: 'assistant'
-      }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   return (
     <div className="flex-1 flex flex-col bg-linear-to-b from-blue-50 to-purple-50 min-h-0 overflow-hidden">
@@ -139,10 +43,10 @@ export function ChatPanel() {
             )}
             <span>Qualitative</span>
           </button>
-          
+
           {/* Divider */}
           <div className="w-px bg-gray-300" />
-          
+
           {/* Quantitative option */}
           <button
             onClick={() => setAnalysisType('quantitative')}

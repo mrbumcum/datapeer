@@ -3,6 +3,7 @@ import { HomePage } from './pages/HomePage'
 import { DatabasePage } from './pages/DatabasePage'
 import { StrictMode } from 'react'
 import { Layout } from './components/Layout'
+import { ChatProvider } from './contexts/ChatContext'
 
 const router = createBrowserRouter([
   {
@@ -24,7 +25,9 @@ const router = createBrowserRouter([
 function App() {
   return (
     <StrictMode>
-      <RouterProvider router={router} />
+      <ChatProvider>
+        <RouterProvider router={router} />
+      </ChatProvider>
     </StrictMode>
   )
 }
