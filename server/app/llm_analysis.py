@@ -449,6 +449,7 @@ async def analyze_with_llm_qualitative(
     file_paths: list[str],
     file_names: list[str],
     provider: str | None = None,
+    model: str | None = None,
 ) -> str:
     """
     Perform qualitative analysis on the selected datasets using LLM.
@@ -474,6 +475,7 @@ async def analyze_with_llm_qualitative(
                 provider,
                 system_prompt=system_prompt,
                 user_prompt=user_message,
+                model=model,
                 temperature=0.7,
                 max_tokens=500,
             )
@@ -492,6 +494,7 @@ async def analyze_with_llm_qualitative(
                 provider,
                 system_prompt=system_prompt,
                 user_prompt=user_message,
+                model=model,
                 temperature=0.7,
                 max_tokens=300,
             )
@@ -529,6 +532,7 @@ async def analyze_with_llm_qualitative(
             provider,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            model=model,
             temperature=0.6,
             max_tokens=1800,
         )
@@ -544,6 +548,7 @@ async def analyze_with_llm_quantitative(
     file_paths: list[str],
     file_names: list[str],
     provider: str | None = None,
+    model: str | None = None,
 ) -> dict:
     """
     Perform quantitative/EDA analysis using LLM-generated Python code.
@@ -554,7 +559,7 @@ async def analyze_with_llm_quantitative(
         dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
         
         active_provider = get_active_provider_name(provider)
-
+        
         # For non-OpenAI providers, fall back to a descriptive, narrative-style analysis
         if active_provider != "openai" or client is None:
             qualitative_text = await analyze_with_llm_qualitative(
@@ -562,6 +567,7 @@ async def analyze_with_llm_quantitative(
                 file_paths=file_paths,
                 file_names=file_names,
                 provider=provider,
+                model=model,
             )
             return {
                 "response": qualitative_text,
