@@ -14,7 +14,8 @@ export function Sidebar() {
 
   const navItems = [
     { path: '/', label: 'Home', icon: null },
-    { path: '/database', label: 'Database', icon: databaseIcon }
+    { path: '/database', label: 'Database', icon: databaseIcon },
+    { path: '/benchmark', label: 'Benchmark', icon: null }
   ]
 
   return (

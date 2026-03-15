@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { HomePage } from './pages/HomePage'
 import { DatabasePage } from './pages/DatabasePage'
+import { BenchmarkPage } from './pages/BenchmarkPage'
 import { StrictMode } from 'react'
 import { Layout } from './components/Layout'
 import { ChatProvider } from './contexts/ChatContext'
@@ -17,6 +18,10 @@ const router = createBrowserRouter([
       {
         path: 'database',
         element: <DatabasePage />
+      },
+      {
+        path: 'benchmark',
+        element: <BenchmarkPage />
       }
     ]
   }
