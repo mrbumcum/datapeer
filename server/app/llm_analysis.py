@@ -20,6 +20,12 @@ from .llm_providers import complete_chat, get_active_provider_name
 OPENAI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
+# Simple in-memory cache so we only load each CSV once per process.
+# Keyed by the exact list of file paths to avoid collisions.
+_DATAFRAME_CONTEXT_CACHE: dict[
+    tuple[str, ...], tuple[dict[str, pd.DataFrame], dict[str, dict], str]
+] = {}
+
 
 QUALITATIVE_METHODS_DESCRIPTION = """
 Qualitative Analysis Methods Available:
@@ -66,33 +72,38 @@ def _prepare_dataframe_context(file_paths: list[str], file_names: list[str]):
     Returns:
         tuple of (dataframes_dict, metadata_dict, dataset_summary_str)
     """
-    dataframes = {}
-    dataframe_info = {}
-    summary_lines = []
-    
+    cache_key = tuple(file_paths)
+    if cache_key in _DATAFRAME_CONTEXT_CACHE:
+        return _DATAFRAME_CONTEXT_CACHE[cache_key]
+
+    dataframes: dict[str, pd.DataFrame] = {}
+    dataframe_info: dict[str, dict] = {}
+    summary_lines: list[str] = []
+
     for idx, (file_path, file_name) in enumerate(zip(file_paths, file_names)):
         df = pd.read_csv(file_path)
-        base_name = file_name.replace('.csv', '').lower()
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', base_name)
-        safe_name = re.sub(r'_+', '_', safe_name).strip('_')
-        
+        base_name = file_name.replace(".csv", "").lower()
+        safe_name = re.sub(r"[^a-zA-Z0-9]", "_", base_name)
+        safe_name = re.sub(r"_+", "_", safe_name).strip("_")
+
         if len(file_paths) > 1:
             safe_name = f"df{idx+1}_{safe_name[:30]}"
         else:
             safe_name = f"df_{safe_name[:30]}"
-        
+
         dataframes[safe_name] = df
         dataframe_info[safe_name] = {
             "filename": file_name,
             "rows": len(df),
             "columns": list(df.columns),
-            "shape": df.shape
+            "shape": df.shape,
         }
         summary_lines.append(
             f"- {safe_name}: {file_name} ({len(df)} rows, {df.shape[1]} columns: {', '.join(list(df.columns)[:10])})"
         )
-    
+
     dataset_summary = "Available datasets:\n" + "\n".join(summary_lines)
+    _DATAFRAME_CONTEXT_CACHE[cache_key] = (dataframes, dataframe_info, dataset_summary)
     return dataframes, dataframe_info, dataset_summary
 
 
