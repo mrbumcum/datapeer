@@ -282,7 +282,7 @@ export function BenchmarkPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 flex-1 min-w-0">
               {selectedModelOptions.map((opt) => (
                 <button
                   key={`${opt.provider}:${opt.model}`}
@@ -298,7 +298,7 @@ export function BenchmarkPage() {
                 <span className="text-gray-500">No models selected yet.</span>
               )}
             </div>
-            <div className="relative">
+            <div className="relative ml-auto mt-2 md:mt-0">
               <button
                 type="button"
                 onClick={() => setIsModelPickerOpen((open) => !open)}
