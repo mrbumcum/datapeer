@@ -270,6 +270,42 @@ export function BenchmarkPage() {
                   <span>Runs: {results.length}</span>
                 </span>
               )}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsModelPickerOpen((open) => !open)}
+                  className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-white px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50"
+                >
+                  + Add model
+                </button>
+                {isModelPickerOpen && (
+                  <div className="absolute left-0 z-10 mt-2 w-64 rounded-xl border border-gray-200 bg-white shadow-lg text-xs">
+                    <div className="max-h-64 overflow-auto p-2">
+                      {MODEL_OPTIONS.map((opt) => {
+                        const key = `${opt.provider}:${opt.model}`
+                        const checked = selectedModels.has(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => toggleModel(key)}
+                            className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left ${
+                              checked ? 'bg-purple-50 text-gray-900' : 'hover:bg-gray-50 text-gray-700'
+                            }`}
+                          >
+                            <span className="truncate">{opt.label}</span>
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                checked ? 'bg-purple-500' : 'border border-gray-300 bg-white'
+                              }`}
+                            />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <button
               type="button"
@@ -282,7 +318,7 @@ export function BenchmarkPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+            <div className="flex flex-wrap gap-2">
               {selectedModelOptions.map((opt) => (
                 <button
                   key={`${opt.provider}:${opt.model}`}
@@ -296,42 +332,6 @@ export function BenchmarkPage() {
               ))}
               {selectedModelOptions.length === 0 && (
                 <span className="text-gray-500">No models selected yet.</span>
-              )}
-            </div>
-            <div className="relative ml-auto mt-2 md:mt-0">
-              <button
-                type="button"
-                onClick={() => setIsModelPickerOpen((open) => !open)}
-                className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-white px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50"
-              >
-                + Add model
-              </button>
-              {isModelPickerOpen && (
-                <div className="absolute right-0 z-10 mt-2 w-64 rounded-xl border border-gray-200 bg-white shadow-lg text-xs">
-                  <div className="max-h-64 overflow-auto p-2">
-                    {MODEL_OPTIONS.map((opt) => {
-                      const key = `${opt.provider}:${opt.model}`
-                      const checked = selectedModels.has(key)
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => toggleModel(key)}
-                          className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left ${
-                            checked ? 'bg-purple-50 text-gray-900' : 'hover:bg-gray-50 text-gray-700'
-                          }`}
-                        >
-                          <span className="truncate">{opt.label}</span>
-                          <span
-                            className={`h-2 w-2 rounded-full ${
-                              checked ? 'bg-purple-500' : 'border border-gray-300 bg-white'
-                            }`}
-                          />
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
               )}
             </div>
           </div>
