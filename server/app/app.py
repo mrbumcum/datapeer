@@ -5,8 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import os
 import csv
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal, List
+import asyncio
 from pydantic import BaseModel
 from . import database
 from . import llm_analysis
@@ -22,6 +24,46 @@ class ChatMessage(BaseModel):
     selected_file_ids: list[int] = []
     provider: Optional[str] = None
     model: Optional[str] = None
+
+
+class BenchmarkVariant(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    context_mode: Literal["none", "light", "rich"] = "none"
+
+
+class BenchmarkRequest(BaseModel):
+    message: str
+    analysis_type: Literal["qualitative", "quantitative"]
+    selected_file_ids: list[int]
+    runs: int = 1
+    variants: List[BenchmarkVariant]
+
+
+class SingleBenchmarkRequest(BaseModel):
+    message: str
+    analysis_type: Literal["qualitative", "quantitative"]
+    selected_file_ids: list[int]
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    context_mode: Literal["none", "light", "rich"] = "none"
+
+
+class BenchmarkRun(BaseModel):
+    timestamp: float
+    run_index: int
+    analysis_type: str
+    provider: Optional[str]
+    model: Optional[str]
+    context_mode: str
+    latency_ms: float
+    files_analyzed: list[str]
+    response: Optional[str] = None
+    code: Optional[str] = None
+    code_explanation: Optional[str] = None
+    data_output: Optional[str] = None
+    code_success: Optional[bool] = None
+    code_error: Optional[str] = None
 
 app = FastAPI()
 
@@ -267,3 +309,143 @@ async def chat_with_llm(chat_request: ChatMessage):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
+
+
+@app.post("/api/benchmark")
+async def run_benchmark(request: BenchmarkRequest):
+    """Run timed EDA analyses across multiple provider/model/context variants."""
+    try:
+        if request.runs < 1:
+            raise HTTPException(status_code=400, detail="runs must be at least 1")
+
+        if not request.selected_file_ids:
+            raise HTTPException(status_code=400, detail="No files selected. Please select at least one dataset.")
+
+        # Fetch file records from database
+        all_files = await database.get_all_files()
+        selected_files = [
+            f for f in all_files
+            if f["id"] in request.selected_file_ids
+        ]
+
+        if not selected_files:
+            raise HTTPException(status_code=404, detail="Selected files not found")
+
+        # Validate files exist on disk
+        file_paths: list[str] = []
+        file_names: list[str] = []
+        for file_record in selected_files:
+            file_path = Path(file_record["file_path"])
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File {file_record['filename']} not found on disk")
+            file_paths.append(str(file_path))
+            file_names.append(file_record["filename"])
+
+        now = time.time()
+
+        tasks = []
+        meta: list[tuple[int, BenchmarkVariant]] = []
+        for variant_index, variant in enumerate(request.variants):
+            for run_index in range(request.runs):
+                tasks.append(
+                    llm_analysis.run_timed_analysis(
+                        analysis_type=request.analysis_type,
+                        user_message=request.message,
+                        file_paths=file_paths,
+                        file_names=file_names,
+                        provider=variant.provider,
+                        model=variant.model,
+                        context_mode=variant.context_mode,
+                    )
+                )
+                meta.append((run_index, variant))
+
+        analyses = await asyncio.gather(*tasks)
+
+        results: list[BenchmarkRun] = []
+        for (run_index, variant), analysis in zip(meta, analyses):
+            run = BenchmarkRun(
+                timestamp=now,
+                run_index=run_index,
+                analysis_type=analysis.get("analysis_type", request.analysis_type),
+                provider=analysis.get("provider", variant.provider),
+                model=analysis.get("model", variant.model),
+                context_mode=analysis.get("context_mode", variant.context_mode),
+                latency_ms=float(analysis.get("latency_ms", 0.0)),
+                files_analyzed=analysis.get("files_analyzed", file_names),
+                response=analysis.get("response"),
+                code=analysis.get("code"),
+                code_explanation=analysis.get("code_explanation"),
+                data_output=analysis.get("data_output"),
+                code_success=analysis.get("code_success"),
+                code_error=analysis.get("code_error"),
+            )
+            results.append(run)
+
+        return {"results": [r.model_dump() for r in results]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running benchmark: {str(e)}")
+
+
+@app.post("/api/benchmark/run-once")
+async def run_single_benchmark(request: SingleBenchmarkRequest):
+    """Run a single timed analysis for one provider/model/context."""
+    try:
+        if not request.selected_file_ids:
+            raise HTTPException(status_code=400, detail="No files selected. Please select at least one dataset.")
+
+        # Fetch file records from database
+        all_files = await database.get_all_files()
+        selected_files = [
+            f for f in all_files
+            if f["id"] in request.selected_file_ids
+        ]
+
+        if not selected_files:
+            raise HTTPException(status_code=404, detail="Selected files not found")
+
+        # Validate files exist on disk
+        file_paths: list[str] = []
+        file_names: list[str] = []
+        for file_record in selected_files:
+            file_path = Path(file_record["file_path"])
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File {file_record['filename']} not found on disk")
+            file_paths.append(str(file_path))
+            file_names.append(file_record["filename"])
+
+        now = time.time()
+        analysis = await llm_analysis.run_timed_analysis(
+            analysis_type=request.analysis_type,
+            user_message=request.message,
+            file_paths=file_paths,
+            file_names=file_names,
+            provider=request.provider,
+            model=request.model,
+            context_mode=request.context_mode,
+        )
+
+        run = BenchmarkRun(
+            timestamp=now,
+            run_index=0,
+            analysis_type=analysis.get("analysis_type", request.analysis_type),
+            provider=analysis.get("provider", request.provider),
+            model=analysis.get("model", request.model),
+            context_mode=analysis.get("context_mode", request.context_mode),
+            latency_ms=float(analysis.get("latency_ms", 0.0)),
+            files_analyzed=analysis.get("files_analyzed", file_names),
+            response=analysis.get("response"),
+            code=analysis.get("code"),
+            code_explanation=analysis.get("code_explanation"),
+            data_output=analysis.get("data_output"),
+            code_success=analysis.get("code_success"),
+            code_error=analysis.get("code_error"),
+        )
+
+        return run.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running single benchmark: {str(e)}")

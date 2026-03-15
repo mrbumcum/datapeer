@@ -13,8 +13,18 @@ load_dotenv()
 from .llm_providers import complete_chat, get_active_provider_name
 
 
+# ---------------------------------------------------------------------------
+# Shared context builders for EDA and benchmarking
+# ---------------------------------------------------------------------------
+
 OPENAI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+# Simple in-memory cache so we only load each CSV once per process.
+# Keyed by the exact list of file paths to avoid collisions.
+_DATAFRAME_CONTEXT_CACHE: dict[
+    tuple[str, ...], tuple[dict[str, pd.DataFrame], dict[str, dict], str]
+] = {}
 
 
 QUALITATIVE_METHODS_DESCRIPTION = """
@@ -62,34 +72,72 @@ def _prepare_dataframe_context(file_paths: list[str], file_names: list[str]):
     Returns:
         tuple of (dataframes_dict, metadata_dict, dataset_summary_str)
     """
-    dataframes = {}
-    dataframe_info = {}
-    summary_lines = []
-    
+    cache_key = tuple(file_paths)
+    if cache_key in _DATAFRAME_CONTEXT_CACHE:
+        return _DATAFRAME_CONTEXT_CACHE[cache_key]
+
+    dataframes: dict[str, pd.DataFrame] = {}
+    dataframe_info: dict[str, dict] = {}
+    summary_lines: list[str] = []
+
     for idx, (file_path, file_name) in enumerate(zip(file_paths, file_names)):
         df = pd.read_csv(file_path)
-        base_name = file_name.replace('.csv', '').lower()
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', base_name)
-        safe_name = re.sub(r'_+', '_', safe_name).strip('_')
-        
+        base_name = file_name.replace(".csv", "").lower()
+        safe_name = re.sub(r"[^a-zA-Z0-9]", "_", base_name)
+        safe_name = re.sub(r"_+", "_", safe_name).strip("_")
+
         if len(file_paths) > 1:
             safe_name = f"df{idx+1}_{safe_name[:30]}"
         else:
             safe_name = f"df_{safe_name[:30]}"
-        
+
         dataframes[safe_name] = df
         dataframe_info[safe_name] = {
             "filename": file_name,
             "rows": len(df),
             "columns": list(df.columns),
-            "shape": df.shape
+            "shape": df.shape,
         }
         summary_lines.append(
             f"- {safe_name}: {file_name} ({len(df)} rows, {df.shape[1]} columns: {', '.join(list(df.columns)[:10])})"
         )
-    
+
     dataset_summary = "Available datasets:\n" + "\n".join(summary_lines)
+    _DATAFRAME_CONTEXT_CACHE[cache_key] = (dataframes, dataframe_info, dataset_summary)
     return dataframes, dataframe_info, dataset_summary
+
+
+def build_context_block(
+    file_paths: list[str],
+    file_names: list[str],
+    context_mode: str,
+) -> tuple[str, dict[str, pd.DataFrame]]:
+    """
+    Build a text context block describing the datasets at different levels.
+
+    Returns a tuple of (context_text, dataframes_dict) so callers that need
+    in-memory DataFrames (e.g. quantitative analysis) can reuse the same load.
+    """
+    # Always prepare the base structures once
+    dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
+
+    if context_mode == "none":
+        return "", dataframes
+
+    if context_mode == "light":
+        # Light context: high-level dataset summary only
+        header = "Dataset context (light):\n"
+        return header + dataset_summary, dataframes
+
+    # Rich context: dataset summary + qualitative column-level insights
+    qualitative_context = _build_qualitative_context(dataframes)
+    rich_parts = [
+        "Dataset context (rich):",
+        dataset_summary,
+        "",
+        qualitative_context,
+    ]
+    return "\n".join(rich_parts), dataframes
 
 
 async def generate_data_profile(file_path: str) -> dict:
@@ -315,8 +363,7 @@ Respond with ONLY the category word: "conversational", "preliminary", or "analys
                 },
                 {"role": "user", "content": check_prompt},
             ],
-            temperature=0.1,
-            max_tokens=15,
+            max_completion_tokens=15,
         )
 
         result = response.choices[0].message.content.strip().lower()
@@ -471,7 +518,10 @@ async def analyze_with_llm_qualitative(
         
         # Handle conversational messages
         if message_type == "conversational":
-            system_prompt = "You are a helpful AI assistant. Respond naturally and conversationally to the user's message. Keep responses brief and friendly."
+            system_prompt = (
+                "You are a helpful AI assistant. Respond naturally and conversationally to the user's message. "
+                "Keep responses brief and friendly."
+            )
 
             text = await complete_chat(
                 provider,
@@ -639,8 +689,7 @@ Keep responses focused on EDA insights (trends, comparisons, distributions)."""
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.3,
-                max_tokens=1800
+                max_completion_tokens=1800
             )
             
             message = response.choices[0].message
@@ -709,4 +758,105 @@ Keep responses focused on EDA insights (trends, comparisons, distributions)."""
     
     except Exception as e:
         raise Exception(f"Error in quantitative LLM analysis: {str(e)}")
+
+
+async def run_timed_analysis(
+    *,
+    analysis_type: str,
+    user_message: str,
+    file_paths: list[str],
+    file_names: list[str],
+    provider: str | None = None,
+    model: str | None = None,
+    context_mode: str = "none",
+) -> dict:
+    """
+    Wrapper used by the benchmark endpoint to:
+    - Build a context block (none/light/rich)
+    - Call the appropriate qualitative/quantitative analysis function
+    - Measure end-to-end latency in milliseconds
+    - Return a structured result dictionary
+    """
+    # Build context and keep dataframes in memory when needed
+    context_block, _ = build_context_block(file_paths, file_names, context_mode)
+
+    if context_block:
+        augmented_message = (
+            f"{context_block}\n\n"
+            f"User question:\n{user_message}"
+        )
+    else:
+        augmented_message = user_message
+
+    start = pd.Timestamp.utcnow()
+
+    if analysis_type == "qualitative":
+        response_text = await analyze_with_llm_qualitative(
+            user_message=augmented_message,
+            file_paths=file_paths,
+            file_names=file_names,
+            provider=provider,
+            model=model,
+        )
+        end = pd.Timestamp.utcnow()
+        latency_ms = (end - start).total_seconds() * 1000.0
+
+        return {
+            "analysis_type": analysis_type,
+            "provider": provider,
+            "model": model,
+            "context_mode": context_mode,
+            "latency_ms": latency_ms,
+            "response": response_text,
+            "files_analyzed": file_names,
+            "code": None,
+            "code_explanation": None,
+            "data_output": "",
+            "code_success": None,
+            "code_error": None,
+        }
+
+    if analysis_type == "quantitative":
+        quant_result = await analyze_with_llm_quantitative(
+            user_message=augmented_message,
+            file_paths=file_paths,
+            file_names=file_names,
+            provider=provider,
+            model=model,
+        )
+        end = pd.Timestamp.utcnow()
+        latency_ms = (end - start).total_seconds() * 1000.0
+
+        return {
+            "analysis_type": analysis_type,
+            "provider": provider,
+            "model": model,
+            "context_mode": context_mode,
+            "latency_ms": latency_ms,
+            "response": quant_result.get("response"),
+            "files_analyzed": file_names,
+            "code": quant_result.get("code"),
+            "code_explanation": quant_result.get("code_explanation"),
+            "data_output": quant_result.get("data_output"),
+            "code_success": quant_result.get("code_success"),
+            "code_error": quant_result.get("code_error"),
+        }
+
+    # Fallback for unknown analysis types
+    end = pd.Timestamp.utcnow()
+    latency_ms = (end - start).total_seconds() * 1000.0
+    return {
+        "analysis_type": analysis_type,
+        "provider": provider,
+        "model": model,
+        "context_mode": context_mode,
+        "latency_ms": latency_ms,
+        "response": f"Unsupported analysis_type: {analysis_type}",
+        "files_analyzed": file_names,
+        "code": None,
+        "code_explanation": None,
+        "data_output": "",
+        "code_success": False,
+        "code_error": f"Unsupported analysis_type: {analysis_type}",
+    }
 

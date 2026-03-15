@@ -130,14 +130,13 @@ def _ensure_claude_client():
 
 
 def _ensure_gemini_client():
-    import google.generativeai as genai
+    from google import genai
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
-    genai.configure(api_key=api_key)
-    # The model handle is created per call; configuration is global
-    return genai
+    # New Google GenAI client; lightweight to construct per call.
+    return genai.Client(api_key=api_key)
 
 
 async def complete_chat(
@@ -165,8 +164,7 @@ async def complete_chat(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -193,10 +191,12 @@ async def complete_chat(
         return "\n".join([p for p in text_parts if p]).strip()
 
     if normalized == "gemini":
-        genai = _ensure_gemini_client()
-        text_model = genai.GenerativeModel(resolved_model)
+        client = _ensure_gemini_client()
         prompt = f"{system_prompt}\n\nUser:\n{user_prompt}"
-        result = text_model.generate_content(prompt)
+        result = client.models.generate_content(
+            model=resolved_model,
+            contents=prompt,
+        )
         text = getattr(result, "text", None)
         if text:
             return text.strip()
@@ -221,8 +221,7 @@ async def complete_chat(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=temperature,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_tokens,
     )
     return response.choices[0].message.content or ""
 

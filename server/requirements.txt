@@ -8,5 +8,5 @@ openai
 python-dotenv
 ydata-profiling
 anthropic
-google-generativeai
+google-genai
 python-multipart
