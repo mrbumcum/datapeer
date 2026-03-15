@@ -352,8 +352,7 @@ Respond with ONLY the category word: "conversational", "preliminary", or "analys
                 },
                 {"role": "user", "content": check_prompt},
             ],
-            temperature=0.1,
-            max_tokens=15,
+            max_completion_tokens=15,
         )
 
         result = response.choices[0].message.content.strip().lower()
@@ -508,7 +507,10 @@ async def analyze_with_llm_qualitative(
         
         # Handle conversational messages
         if message_type == "conversational":
-            system_prompt = "You are a helpful AI assistant. Respond naturally and conversationally to the user's message. Keep responses brief and friendly."
+            system_prompt = (
+                "You are a helpful AI assistant. Respond naturally and conversationally to the user's message. "
+                "Keep responses brief and friendly."
+            )
 
             text = await complete_chat(
                 provider,
@@ -676,8 +678,7 @@ Keep responses focused on EDA insights (trends, comparisons, distributions)."""
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.3,
-                max_tokens=1800
+                max_completion_tokens=1800
             )
             
             message = response.choices[0].message

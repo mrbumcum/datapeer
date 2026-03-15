@@ -159,14 +159,16 @@ async def complete_chat(
 
     if normalized == "openai":
         client = _ensure_openai_client()
+        # Newer OpenAI models may only support the default sampling configuration.
+        # To avoid unsupported temperature values, we omit temperature entirely and
+        # only constrain the maximum completion tokens.
         response = client.chat.completions.create(
             model=resolved_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -221,8 +223,7 @@ async def complete_chat(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=temperature,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_tokens,
     )
     return response.choices[0].message.content or ""
 
