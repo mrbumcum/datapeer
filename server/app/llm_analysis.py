@@ -604,30 +604,105 @@ async def analyze_with_llm_quantitative(
 ) -> dict:
     """
     Perform quantitative/EDA analysis using LLM-generated Python code.
-    
+
     Returns dictionary with response text, code, output, and execution metadata.
     """
     try:
         dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
-        
+
         active_provider = get_active_provider_name(provider)
-        
-        # For non-OpenAI providers, fall back to a descriptive, narrative-style analysis
+
+        # For non-OpenAI providers, fall back to a provider-agnostic JSON-based code loop
+        # that still routes all execution through the shared execute_safe_code sandbox.
         if active_provider != "openai" or client is None:
-            qualitative_text = await analyze_with_llm_qualitative(
-                user_message=user_message,
-                file_paths=file_paths,
-                file_names=file_names,
-                provider=provider,
-                model=model,
+            planning_system_prompt = (
+                "You are a senior data scientist performing exploratory quantitative analysis.\n"
+                "You have server-side access to complete datasets loaded as pandas DataFrames.\n"
+                "Your task is to propose a single, well-structured analysis step.\n\n"
+                "Respond ONLY with a JSON object of the form:\n"
+                '{\"code\": \"<python code>\", \"explanation\": \"<short explanation>\"}\n\n'
+                "The code should:\n"
+                "- Assume pandas is imported as `pd` and NumPy as `np`.\n"
+                "- Use the provided dataframe variable names.\n"
+                "- Use print() to show key tables or summaries.\n"
+                "- Avoid reading or writing files, and avoid imports.\n"
             )
+
+            planning_user_prompt = (
+                f"User request:\n{user_message}\n\n"
+                f"Available datasets:\n{dataset_summary}\n\n"
+                "Plan a single analysis step and return JSON as specified."
+            )
+
+            # Ask the chosen provider to propose code + explanation as JSON.
+            planning_reply = await complete_chat(
+                provider,
+                system_prompt=planning_system_prompt,
+                user_prompt=planning_user_prompt,
+                model=model,
+                temperature=0.4,
+                max_tokens=800,
+            )
+
+            # Attempt to parse the model's reply as JSON, falling back gracefully on error.
+            proposed_code: str | None = None
+            code_explanation: str = ""
+            try:
+                parsed = json.loads(planning_reply)
+                if isinstance(parsed, dict):
+                    proposed_code = str(parsed.get("code") or "")
+                    code_explanation = str(parsed.get("explanation") or "")
+            except Exception:
+                proposed_code = None
+
+            if not proposed_code:
+                qualitative_text = await analyze_with_llm_qualitative(
+                    user_message=user_message,
+                    file_paths=file_paths,
+                    file_names=file_names,
+                    provider=provider,
+                    model=model,
+                )
+                return {
+                    "response": qualitative_text,
+                    "code": None,
+                    "code_explanation": "The model did not return valid JSON code; returned a qualitative summary instead.",
+                    "data_output": "",
+                    "code_success": False,
+                    "code_error": "Failed to parse model output as JSON for code execution.",
+                }
+
+            data_output, success = await execute_safe_code(proposed_code, dataframes)
+
+            # Ask the same provider for a narrative summary using the code output.
+            summary_system_prompt = (
+                "You are a senior data analyst.\n"
+                "You will see a user question, the code that was executed, and its textual output.\n"
+                "Write a clear, concise explanation of the main findings, citing concrete values."
+            )
+            summary_user_prompt = (
+                f"User request:\n{user_message}\n\n"
+                f"Executed code:\n{proposed_code}\n\n"
+                f"Execution output:\n{data_output}\n\n"
+                "Summarise the key quantitative insights in plain language."
+            )
+
+            narrative = await complete_chat(
+                provider,
+                system_prompt=summary_system_prompt,
+                user_prompt=summary_user_prompt,
+                model=model,
+                temperature=0.5,
+                max_tokens=800,
+            )
+
             return {
-                "response": qualitative_text,
-                "code": None,
-                "code_explanation": "Code execution is currently only available with the OpenAI provider.",
-                "data_output": "",
-                "code_success": False,
-                "code_error": "Code execution is only supported when using the OpenAI provider.",
+                "response": narrative.strip(),
+                "code": proposed_code,
+                "code_explanation": code_explanation,
+                "data_output": data_output,
+                "code_success": success,
+                "code_error": None if success else data_output,
             }
 
         tools = [
