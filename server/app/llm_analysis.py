@@ -8,12 +8,11 @@ import re
 
 load_dotenv()
 
-# Initialize OpenAI client
-OPENAI_API_KEY = os.getenv("OPEN_AI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPEN_AI_API_KEY environment variable is not set")
+from .llm_providers import complete_chat, get_active_provider_name
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+
+OPENAI_API_KEY = os.getenv("OPEN_AI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 QUALITATIVE_METHODS_DESCRIPTION = """
@@ -292,7 +291,7 @@ async def classify_message(user_message: str) -> str:
         if is_strict_preliminary and not (has_question_word or has_question_mark):
             return "preliminary"
         
-        # Use LLM for better classification
+        # Use LLM for better classification when OpenAI is available
         check_prompt = f"""Classify this user message into one of three categories:
 1. "conversational" - casual chat, greetings, thanks, general conversation with no data request
 2. "preliminary" - mentions dataset/data but is just stating intent (e.g., "I have a question about the dataset" without the actual question)
@@ -302,16 +301,22 @@ User message: "{user_message}"
 
 Respond with ONLY the category word: "conversational", "preliminary", or "analysis"."""
 
+        if client is None:
+            return "analysis"
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You classify messages into 'conversational', 'preliminary', or 'analysis'. Respond with only one word."},
-                {"role": "user", "content": check_prompt}
+                {
+                    "role": "system",
+                    "content": "You classify messages into 'conversational', 'preliminary', or 'analysis'. Respond with only one word.",
+                },
+                {"role": "user", "content": check_prompt},
             ],
             temperature=0.1,
-            max_tokens=15
+            max_tokens=15,
         )
-        
+
         result = response.choices[0].message.content.strip().lower()
         if "preliminary" in result:
             return "preliminary"
@@ -442,7 +447,8 @@ async def execute_safe_code(code: str, dataframes: dict[str, pd.DataFrame]) -> t
 async def analyze_with_llm_qualitative(
     user_message: str,
     file_paths: list[str],
-    file_names: list[str]
+    file_names: list[str],
+    provider: str | None = None,
 ) -> str:
     """
     Perform qualitative analysis on the selected datasets using LLM.
@@ -457,83 +463,77 @@ async def analyze_with_llm_qualitative(
         LLM response string
     """
     try:
-        # Classify the message type
+        # Classify the message type (always uses OpenAI when available)
         message_type = await classify_message(user_message)
         
         # Handle conversational messages
         if message_type == "conversational":
-            system_prompt = """You are a helpful AI assistant. Respond naturally and conversationally to the user's message. Keep responses brief and friendly."""
-            
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
+            system_prompt = "You are a helpful AI assistant. Respond naturally and conversationally to the user's message. Keep responses brief and friendly."
+
+            text = await complete_chat(
+                provider,
+                system_prompt=system_prompt,
+                user_prompt=user_message,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
             )
-            
-            return response.choices[0].message.content
+
+            return text
         
         # Handle preliminary statements (e.g., "I have a question about the dataset")
         if message_type == "preliminary":
-            system_prompt = """You are a helpful AI data analyst assistant. The user has indicated they want to ask about the dataset, but hasn't asked their specific question yet. Respond naturally and encouragingly, asking them what they'd like to know or analyze. Keep it brief and friendly."""
-            
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.7,
-                max_tokens=300
+            system_prompt = (
+                "You are a helpful AI data analyst assistant. The user has indicated they want to ask about "
+                "the dataset, but hasn't asked their specific question yet. Respond naturally and encouragingly, "
+                "asking them what they'd like to know or analyze. Keep it brief and friendly."
             )
-            
-            return response.choices[0].message.content
+
+            text = await complete_chat(
+                provider,
+                system_prompt=system_prompt,
+                user_prompt=user_message,
+                temperature=0.7,
+                max_tokens=300,
+            )
+
+            return text
         
         # Load datasets and build qualitative summaries (no tool execution needed)
         dataframes, _, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
         qualitative_context = _build_qualitative_context(dataframes)
         
-        system_prompt = f"""You are an expert data analyst specializing in qualitative research methods.
-Your job is to interpret structured dataset summaries and craft narrative, theme-based findings.
-
-{QUALITATIVE_METHODS_DESCRIPTION}
-
-Guidelines:
-- Treat numeric trends as qualitative stories (e.g., "emerging regions", "outlier segments").
-- Always cite evidence from the provided summaries (column names, relative magnitudes, notable values).
-- Highlight at least three insights, each with a short explanation of why it matters.
-- Mention relevant limitations or missing context if the data cannot fully answer the question.
-- Stay natural and conversational—avoid rigid templates."""
-        
-        user_prompt = f"""User request:
-{user_message}
-
-Dataset overview:
-{dataset_summary}
-
-Detailed qualitative context:
-{qualitative_context}
-
-Please respond with qualitative analysis that:
-1. Directly answers the user's question.
-2. Names each key theme and describes the supporting evidence.
-3. Explains implications or recommended next questions.
-4. Notes any data gaps or assumptions when appropriate."""
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.6,
-            max_tokens=1800
+        system_prompt = (
+            "You are an expert data analyst specializing in qualitative research methods.\n"
+            "Your job is to interpret structured dataset summaries and craft narrative, theme-based findings.\n\n"
+            f"{QUALITATIVE_METHODS_DESCRIPTION}\n\n"
+            "Guidelines:\n"
+            '- Treat numeric trends as qualitative stories (e.g., "emerging regions", "outlier segments").\n'
+            "- Always cite evidence from the provided summaries (column names, relative magnitudes, notable values).\n"
+            "- Highlight at least three insights, each with a short explanation of why it matters.\n"
+            "- Mention relevant limitations or missing context if the data cannot fully answer the question.\n"
+            "- Stay natural and conversational—avoid rigid templates."
         )
-        
-        return response.choices[0].message.content.strip()
+
+        user_prompt = (
+            f"User request:\n{user_message}\n\n"
+            f"Dataset overview:\n{dataset_summary}\n\n"
+            f"Detailed qualitative context:\n{qualitative_context}\n\n"
+            "Please respond with qualitative analysis that:\n"
+            "1. Directly answers the user's question.\n"
+            "2. Names each key theme and describes the supporting evidence.\n"
+            "3. Explains implications or recommended next questions.\n"
+            "4. Notes any data gaps or assumptions when appropriate."
+        )
+
+        text = await complete_chat(
+            provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.6,
+            max_tokens=1800,
+        )
+
+        return text.strip()
         
     except Exception as e:
         raise Exception(f"Error in LLM analysis: {str(e)}")
@@ -542,7 +542,8 @@ Please respond with qualitative analysis that:
 async def analyze_with_llm_quantitative(
     user_message: str,
     file_paths: list[str],
-    file_names: list[str]
+    file_names: list[str],
+    provider: str | None = None,
 ) -> dict:
     """
     Perform quantitative/EDA analysis using LLM-generated Python code.
@@ -552,6 +553,25 @@ async def analyze_with_llm_quantitative(
     try:
         dataframes, dataframe_info, dataset_summary = _prepare_dataframe_context(file_paths, file_names)
         
+        active_provider = get_active_provider_name(provider)
+
+        # For non-OpenAI providers, fall back to a descriptive, narrative-style analysis
+        if active_provider != "openai" or client is None:
+            qualitative_text = await analyze_with_llm_qualitative(
+                user_message=user_message,
+                file_paths=file_paths,
+                file_names=file_names,
+                provider=provider,
+            )
+            return {
+                "response": qualitative_text,
+                "code": None,
+                "code_explanation": "Code execution is currently only available with the OpenAI provider.",
+                "data_output": "",
+                "code_success": False,
+                "code_error": "Code execution is only supported when using the OpenAI provider.",
+            }
+
         tools = [
             {
                 "type": "function",
