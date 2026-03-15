@@ -18,6 +18,7 @@ class ChatMessage(BaseModel):
     analysis_type: str  # 'qualitative' or 'quantitative'
     selected_file_ids: list[int] = []
     provider: str | None = None
+    model: str | None = None
 
 app = FastAPI()
 
@@ -229,6 +230,7 @@ async def chat_with_llm(chat_request: ChatMessage):
                 file_paths=file_paths,
                 file_names=file_names,
                 provider=chat_request.provider,
+                model=chat_request.model,
             )
             
             return {
@@ -242,6 +244,7 @@ async def chat_with_llm(chat_request: ChatMessage):
                 file_paths=file_paths,
                 file_names=file_names,
                 provider=chat_request.provider,
+                model=chat_request.model,
             )
             
             return {
