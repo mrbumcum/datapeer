@@ -21,21 +21,23 @@ function loadFromStorage() {
     return {
       messages: data.messages ?? [],
       analysisType: data.analysisType ?? 'qualitative',
-      quantAnalysis: data.quantAnalysis ?? defaultQuantAnalysis
+      quantAnalysis: data.quantAnalysis ?? defaultQuantAnalysis,
+      provider: data.provider ?? 'openai'
     }
   } catch {
     return null
   }
 }
 
-function saveToStorage(messages, analysisType, quantAnalysis) {
+function saveToStorage(messages, analysisType, quantAnalysis, provider) {
   try {
     localStorage.setItem(
       CHAT_STORAGE_KEY,
       JSON.stringify({
         messages,
         analysisType,
-        quantAnalysis: quantAnalysis ?? defaultQuantAnalysis
+        quantAnalysis: quantAnalysis ?? defaultQuantAnalysis,
+        provider: provider ?? 'openai'
       })
     )
   } catch {
@@ -49,6 +51,7 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
   const [messages, setMessages] = useState([])
   const [analysisType, setAnalysisType] = useState('qualitative')
   const [quantAnalysis, setQuantAnalysis] = useState(defaultQuantAnalysis)
+  const [provider, setProvider] = useState('openai')
   const [selectedFiles, setSelectedFiles] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
@@ -58,12 +61,13 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
       setMessages(cached.messages)
       setAnalysisType(cached.analysisType)
       setQuantAnalysis(cached.quantAnalysis)
+      setProvider(cached.provider ?? 'openai')
     }
   }, [])
 
   useEffect(() => {
-    saveToStorage(messages, analysisType, quantAnalysis)
-  }, [messages, analysisType, quantAnalysis])
+    saveToStorage(messages, analysisType, quantAnalysis, provider)
+  }, [messages, analysisType, quantAnalysis, provider])
 
   const fetchSelectedFiles = useCallback(async () => {
     try {
@@ -104,7 +108,8 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
           body: JSON.stringify({
             message: text,
             analysis_type: analysisType,
-            selected_file_ids: latestSelectedFiles.map((f) => f.id)
+            selected_file_ids: latestSelectedFiles.map((f) => f.id),
+            provider
           })
         })
 
@@ -145,7 +150,7 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
         setIsLoading(false)
       }
     },
-    [apiBaseUrl, analysisType, fetchSelectedFiles]
+    [apiBaseUrl, analysisType, fetchSelectedFiles, provider]
   )
 
   const value = {
@@ -159,7 +164,9 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
     setSelectedFiles,
     isLoading,
     fetchSelectedFiles,
-    handleSendMessage
+    handleSendMessage,
+    provider,
+    setProvider
   }
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
