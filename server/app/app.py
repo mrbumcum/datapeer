@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import os
 import csv
 from pathlib import Path
+from typing import Optional
 from pydantic import BaseModel
 from . import database
 from . import llm_analysis
@@ -17,6 +20,8 @@ class ChatMessage(BaseModel):
     message: str
     analysis_type: str  # 'qualitative' or 'quantitative'
     selected_file_ids: list[int] = []
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 app = FastAPI()
 
@@ -226,7 +231,9 @@ async def chat_with_llm(chat_request: ChatMessage):
             response_text = await llm_analysis.analyze_with_llm_qualitative(
                 user_message=chat_request.message,
                 file_paths=file_paths,
-                file_names=file_names
+                file_names=file_names,
+                provider=chat_request.provider,
+                model=chat_request.model,
             )
             
             return {
@@ -238,7 +245,9 @@ async def chat_with_llm(chat_request: ChatMessage):
             quant_result = await llm_analysis.analyze_with_llm_quantitative(
                 user_message=chat_request.message,
                 file_paths=file_paths,
-                file_names=file_names
+                file_names=file_names,
+                provider=chat_request.provider,
+                model=chat_request.model,
             )
             
             return {
