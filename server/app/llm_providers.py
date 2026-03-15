@@ -130,14 +130,13 @@ def _ensure_claude_client():
 
 
 def _ensure_gemini_client():
-    import google.generativeai as genai
+    from google import genai
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
-    genai.configure(api_key=api_key)
-    # The model handle is created per call; configuration is global
-    return genai
+    # New Google GenAI client; lightweight to construct per call.
+    return genai.Client(api_key=api_key)
 
 
 async def complete_chat(
@@ -159,9 +158,6 @@ async def complete_chat(
 
     if normalized == "openai":
         client = _ensure_openai_client()
-        # Newer OpenAI models may only support the default sampling configuration.
-        # To avoid unsupported temperature values, we omit temperature entirely and
-        # only constrain the maximum completion tokens.
         response = client.chat.completions.create(
             model=resolved_model,
             messages=[
@@ -195,10 +191,12 @@ async def complete_chat(
         return "\n".join([p for p in text_parts if p]).strip()
 
     if normalized == "gemini":
-        genai = _ensure_gemini_client()
-        text_model = genai.GenerativeModel(resolved_model)
+        client = _ensure_gemini_client()
         prompt = f"{system_prompt}\n\nUser:\n{user_prompt}"
-        result = text_model.generate_content(prompt)
+        result = client.models.generate_content(
+            model=resolved_model,
+            contents=prompt,
+        )
         text = getattr(result, "text", None)
         if text:
             return text.strip()
