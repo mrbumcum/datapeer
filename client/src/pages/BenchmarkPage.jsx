@@ -63,6 +63,7 @@ export function BenchmarkPage() {
   const [results, setResults] = useState([])
   const [error, setError] = useState(null)
   const [manualRatings, setManualRatings] = useState({})
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false)
 
   useEffect(() => {
     const fetchSelectedFiles = async () => {
@@ -102,6 +103,11 @@ export function BenchmarkPage() {
       context_mode: contextMode
     }))
   }, [selectedModels, contextMode])
+
+  const selectedModelOptions = useMemo(
+    () => MODEL_OPTIONS.filter((opt) => selectedModels.has(`${opt.provider}:${opt.model}`)),
+    [selectedModels]
+  )
 
   const onChangeRating = (runKey, field, value) => {
     setManualRatings((prev) => ({
@@ -244,12 +250,91 @@ export function BenchmarkPage() {
   return (
     <div className="h-screen flex flex-col bg-linear-to-b from-blue-50 to-purple-50 p-6">
       <div className="max-w-6xl mx-auto w-full flex flex-col gap-4 flex-1">
-        <header className="flex flex-col gap-2">
-          <h1 className="text-3xl font-bold text-gray-900">Model Benchmarking</h1>
-          <p className="text-sm text-gray-600 max-w-3xl">
-            Run controlled experiments across providers, models, and context modes for exploratory data analysis.
-            Measure latency, code success, and capture manual quality ratings, then export as CSV.
-          </p>
+        <header className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
+              <span className="inline-flex items-center rounded-full border border-gray-300 bg-white px-3 py-1 font-medium text-gray-800">
+                Benchmark run
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    isRunning ? 'bg-emerald-500 animate-pulse' : results.length ? 'bg-emerald-500' : 'bg-gray-300'
+                  }`}
+                />
+                {isRunning ? 'Running…' : results.length ? 'Finished' : 'Idle'}
+              </span>
+              {results.length > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <span className="text-gray-400">•</span>
+                  <span>Runs: {results.length}</span>
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadCsv}
+              disabled={!results.length}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40"
+            >
+              Download CSV
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <div className="flex flex-wrap gap-2">
+              {selectedModelOptions.map((opt) => (
+                <button
+                  key={`${opt.provider}:${opt.model}`}
+                  type="button"
+                  onClick={() => toggleModel(`${opt.provider}:${opt.model}`)}
+                  className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-gray-800 shadow-sm border border-gray-200 hover:bg-gray-50"
+                >
+                  <span>{opt.label}</span>
+                  <span className="ml-1 text-gray-400 hover:text-gray-600">&times;</span>
+                </button>
+              ))}
+              {selectedModelOptions.length === 0 && (
+                <span className="text-gray-500">No models selected yet.</span>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsModelPickerOpen((open) => !open)}
+                className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-white px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50"
+              >
+                + Add model
+              </button>
+              {isModelPickerOpen && (
+                <div className="absolute right-0 z-10 mt-2 w-64 rounded-xl border border-gray-200 bg-white shadow-lg text-xs">
+                  <div className="max-h-64 overflow-auto p-2">
+                    {MODEL_OPTIONS.map((opt) => {
+                      const key = `${opt.provider}:${opt.model}`
+                      const checked = selectedModels.has(key)
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => toggleModel(key)}
+                          className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left ${
+                            checked ? 'bg-purple-50 text-gray-900' : 'hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              checked ? 'bg-purple-500' : 'border border-gray-300 bg-white'
+                            }`}
+                          />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
@@ -352,92 +437,47 @@ export function BenchmarkPage() {
 
           {/* Models and results */}
           <section className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-4 lg:col-span-2 min-h-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-800 mb-2">Models</h2>
-                <div className="border border-gray-200 rounded-xl max-h-52 overflow-auto p-2 text-xs">
-                  {MODEL_OPTIONS.map((opt) => {
-                    const key = `${opt.provider}:${opt.model}`
-                    const checked = selectedModels.has(key)
-                    return (
-                      <label
-                        key={key}
-                        className={`flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer ${
-                          checked ? 'bg-purple-50 text-gray-900' : 'hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="w-3.5 h-3.5 text-purple-600 rounded border-gray-300"
-                          checked={checked}
-                          onChange={() => toggleModel(key)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    )
-                  })}
-                  {MODEL_OPTIONS.length === 0 && (
-                    <p className="text-xs text-gray-500">No models configured.</p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-semibold text-gray-800">Summary</h2>
-                  <button
-                    type="button"
-                    onClick={handleDownloadCsv}
-                    disabled={!results.length}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-100 disabled:opacity-40"
-                  >
-                    Download CSV
-                  </button>
-                </div>
-                {groupedSummary.length === 0 ? (
-                  <p className="text-xs text-gray-500">
-                    No benchmark runs yet. Configure a prompt and models, then click &quot;Run benchmark&quot;.
-                  </p>
-                ) : (
-                  <div className="border border-gray-200 rounded-xl overflow-hidden text-xs">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Model</th>
-                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Context</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Avg latency (ms)</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">
-                            Code success rate
-                          </th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Runs</th>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800 mb-2">Summary</h2>
+              {groupedSummary.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  No benchmark runs yet. Configure a prompt and models, then click &quot;Run benchmark&quot;.
+                </p>
+              ) : (
+                <div className="border border-gray-200 rounded-xl overflow-hidden text-xs">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Model</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Context</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-700">Avg latency (ms)</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-700">Code success rate</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-700">Runs</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {groupedSummary.map((g) => (
+                        <tr key={`${g.provider}:${g.model}:${g.context_mode}`}>
+                          <td className="px-3 py-1.5 text-gray-800">
+                            <div className="flex flex-col">
+                              <span className="font-medium">{g.model}</span>
+                              <span className="text-[11px] text-gray-500">{g.provider}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-700">{g.context_mode}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-800">{g.avgLatency.toFixed(0)}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-800">
+                            {g.analysis_type === 'quantitative'
+                              ? `${(g.successRate * 100).toFixed(0)}%`
+                              : '—'}
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-gray-700">{g.count}</td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {groupedSummary.map((g) => (
-                          <tr key={`${g.provider}:${g.model}:${g.context_mode}`}>
-                            <td className="px-3 py-1.5 text-gray-800">
-                              <div className="flex flex-col">
-                                <span className="font-medium">{g.model}</span>
-                                <span className="text-[11px] text-gray-500">{g.provider}</span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-1.5 text-gray-700">{g.context_mode}</td>
-                            <td className="px-3 py-1.5 text-right text-gray-800">
-                              {g.avgLatency.toFixed(0)}
-                            </td>
-                            <td className="px-3 py-1.5 text-right text-gray-800">
-                              {g.analysis_type === 'quantitative'
-                                ? `${(g.successRate * 100).toFixed(0)}%`
-                                : '—'}
-                            </td>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{g.count}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Individual runs */}
