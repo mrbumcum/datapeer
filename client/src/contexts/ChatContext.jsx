@@ -22,14 +22,15 @@ function loadFromStorage() {
       messages: data.messages ?? [],
       analysisType: data.analysisType ?? 'qualitative',
       quantAnalysis: data.quantAnalysis ?? defaultQuantAnalysis,
-      provider: data.provider ?? 'openai'
+      provider: data.provider ?? 'openai',
+      model: data.model ?? 'gpt-5-mini-2025-08-07'
     }
   } catch {
     return null
   }
 }
 
-function saveToStorage(messages, analysisType, quantAnalysis, provider) {
+function saveToStorage(messages, analysisType, quantAnalysis, provider, model) {
   try {
     localStorage.setItem(
       CHAT_STORAGE_KEY,
@@ -37,7 +38,8 @@ function saveToStorage(messages, analysisType, quantAnalysis, provider) {
         messages,
         analysisType,
         quantAnalysis: quantAnalysis ?? defaultQuantAnalysis,
-        provider: provider ?? 'openai'
+        provider: provider ?? 'openai',
+        model: model ?? 'gpt-5-mini-2025-08-07'
       })
     )
   } catch {
@@ -52,6 +54,7 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
   const [analysisType, setAnalysisType] = useState('qualitative')
   const [quantAnalysis, setQuantAnalysis] = useState(defaultQuantAnalysis)
   const [provider, setProvider] = useState('openai')
+  const [model, setModel] = useState('gpt-5-mini-2025-08-07')
   const [selectedFiles, setSelectedFiles] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
@@ -62,12 +65,13 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
       setAnalysisType(cached.analysisType)
       setQuantAnalysis(cached.quantAnalysis)
       setProvider(cached.provider ?? 'openai')
+      setModel(cached.model ?? 'gpt-5-mini-2025-08-07')
     }
   }, [])
 
   useEffect(() => {
-    saveToStorage(messages, analysisType, quantAnalysis, provider)
-  }, [messages, analysisType, quantAnalysis, provider])
+    saveToStorage(messages, analysisType, quantAnalysis, provider, model)
+  }, [messages, analysisType, quantAnalysis, provider, model])
 
   const fetchSelectedFiles = useCallback(async () => {
     try {
@@ -109,7 +113,8 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
             message: text,
             analysis_type: analysisType,
             selected_file_ids: latestSelectedFiles.map((f) => f.id),
-            provider
+            provider,
+            model
           })
         })
 
@@ -150,7 +155,7 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
         setIsLoading(false)
       }
     },
-    [apiBaseUrl, analysisType, fetchSelectedFiles, provider]
+    [apiBaseUrl, analysisType, fetchSelectedFiles, provider, model]
   )
 
   const value = {
@@ -166,7 +171,9 @@ export function ChatProvider({ children, apiBaseUrl = 'http://localhost:8000' })
     fetchSelectedFiles,
     handleSendMessage,
     provider,
-    setProvider
+    setProvider,
+    model,
+    setModel
   }
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
