@@ -13,7 +13,9 @@ export function ChatPanel() {
     selectedFiles,
     isLoading,
     fetchSelectedFiles,
-    handleSendMessage
+    handleSendMessage,
+    provider,
+    setProvider
   } = useChat()
 
   useEffect(() => {
@@ -24,8 +26,8 @@ export function ChatPanel() {
 
   return (
     <div className="flex-1 flex flex-col bg-linear-to-b from-blue-50 to-purple-50 min-h-0 overflow-hidden">
-      {/* Toggle switch for analysis type */}
-      <div className="flex justify-center pt-6 pb-4 shrink-0">
+      {/* Top controls: analysis type toggle + model selector */}
+      <div className="flex flex-col gap-3 items-center pt-6 pb-4 shrink-0 px-4">
         <div className="inline-flex rounded-lg border border-gray-300 bg-white overflow-hidden shadow-sm">
           {/* Qualitative option */}
           <button
@@ -63,6 +65,20 @@ export function ChatPanel() {
             )}
             <span>Quantitative</span>
           </button>
+        </div>
+
+        {/* Model provider selector */}
+        <div className="flex items-center gap-2 text-xs text-gray-600">
+          <span className="font-medium text-gray-700">Model</span>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="border border-gray-300 rounded-md bg-white px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-400"
+          >
+            <option value="openai">OpenAI · gpt-4o-mini</option>
+            <option value="claude">Claude · Haiku 4.5</option>
+            <option value="gemini">Gemini · 3 Flash preview</option>
+          </select>
         </div>
       </div>
 
