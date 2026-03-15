@@ -9,3 +9,4 @@ python-dotenv
 ydata-profiling
 anthropic
 google-generativeai
+python-multipart
