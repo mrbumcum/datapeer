@@ -61,3 +61,5 @@ text_content.txt
 dist
 dist-ssr
 *.local
+
+writing/
