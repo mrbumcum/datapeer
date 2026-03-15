@@ -8,6 +8,7 @@ import csv
 import time
 from pathlib import Path
 from typing import Optional, Literal, List
+import asyncio
 from pydantic import BaseModel
 from . import database
 from . import llm_analysis
@@ -331,38 +332,46 @@ async def run_benchmark(request: BenchmarkRequest):
             file_paths.append(str(file_path))
             file_names.append(file_record["filename"])
 
-        results: list[BenchmarkRun] = []
         now = time.time()
 
-        for variant in request.variants:
+        tasks = []
+        meta: list[tuple[int, BenchmarkVariant]] = []
+        for variant_index, variant in enumerate(request.variants):
             for run_index in range(request.runs):
-                analysis = await llm_analysis.run_timed_analysis(
-                    analysis_type=request.analysis_type,
-                    user_message=request.message,
-                    file_paths=file_paths,
-                    file_names=file_names,
-                    provider=variant.provider,
-                    model=variant.model,
-                    context_mode=variant.context_mode,
+                tasks.append(
+                    llm_analysis.run_timed_analysis(
+                        analysis_type=request.analysis_type,
+                        user_message=request.message,
+                        file_paths=file_paths,
+                        file_names=file_names,
+                        provider=variant.provider,
+                        model=variant.model,
+                        context_mode=variant.context_mode,
+                    )
                 )
+                meta.append((run_index, variant))
 
-                run = BenchmarkRun(
-                    timestamp=now,
-                    run_index=run_index,
-                    analysis_type=analysis.get("analysis_type", request.analysis_type),
-                    provider=analysis.get("provider", variant.provider),
-                    model=analysis.get("model", variant.model),
-                    context_mode=analysis.get("context_mode", variant.context_mode),
-                    latency_ms=float(analysis.get("latency_ms", 0.0)),
-                    files_analyzed=analysis.get("files_analyzed", file_names),
-                    response=analysis.get("response"),
-                    code=analysis.get("code"),
-                    code_explanation=analysis.get("code_explanation"),
-                    data_output=analysis.get("data_output"),
-                    code_success=analysis.get("code_success"),
-                    code_error=analysis.get("code_error"),
-                )
-                results.append(run)
+        analyses = await asyncio.gather(*tasks)
+
+        results: list[BenchmarkRun] = []
+        for (run_index, variant), analysis in zip(meta, analyses):
+            run = BenchmarkRun(
+                timestamp=now,
+                run_index=run_index,
+                analysis_type=analysis.get("analysis_type", request.analysis_type),
+                provider=analysis.get("provider", variant.provider),
+                model=analysis.get("model", variant.model),
+                context_mode=analysis.get("context_mode", variant.context_mode),
+                latency_ms=float(analysis.get("latency_ms", 0.0)),
+                files_analyzed=analysis.get("files_analyzed", file_names),
+                response=analysis.get("response"),
+                code=analysis.get("code"),
+                code_explanation=analysis.get("code_explanation"),
+                data_output=analysis.get("data_output"),
+                code_success=analysis.get("code_success"),
+                code_error=analysis.get("code_error"),
+            )
+            results.append(run)
 
         return {"results": [r.model_dump() for r in results]}
     except HTTPException:

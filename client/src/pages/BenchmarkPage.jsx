@@ -248,8 +248,8 @@ export function BenchmarkPage() {
   }, [results])
 
   return (
-    <div className="h-screen flex flex-col bg-linear-to-b from-blue-50 to-purple-50 p-6">
-      <div className="max-w-6xl mx-auto w-full flex flex-col gap-4 flex-1">
+    <div className="h-full w-full overflow-y-auto bg-linear-to-b from-blue-50 to-purple-50 p-6">
+      <div className="max-w-6xl mx-auto w-full flex flex-col gap-4 pb-8">
         <header className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
@@ -337,7 +337,7 @@ export function BenchmarkPage() {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Configuration panel */}
           <section className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-4 lg:col-span-1">
             <div>
@@ -436,7 +436,7 @@ export function BenchmarkPage() {
           </section>
 
           {/* Models and results */}
-          <section className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-4 lg:col-span-2 min-h-0">
+          <section className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-4 lg:col-span-2">
             <div>
               <h2 className="text-sm font-semibold text-gray-800 mb-2">Summary</h2>
               {groupedSummary.length === 0 ? (
@@ -481,7 +481,7 @@ export function BenchmarkPage() {
             </div>
 
             {/* Individual runs */}
-            <div className="flex-1 min-h-0 overflow-auto border border-gray-200 rounded-2xl p-3">
+            <div className="border border-gray-200 rounded-2xl p-3">
               {results.length === 0 ? (
                 <p className="text-xs text-gray-500">Run a benchmark to see individual run details.</p>
               ) : (
