@@ -40,6 +40,15 @@ class BenchmarkRequest(BaseModel):
     variants: List[BenchmarkVariant]
 
 
+class SingleBenchmarkRequest(BaseModel):
+    message: str
+    analysis_type: Literal["qualitative", "quantitative"]
+    selected_file_ids: list[int]
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    context_mode: Literal["none", "light", "rich"] = "none"
+
+
 class BenchmarkRun(BaseModel):
     timestamp: float
     run_index: int
@@ -378,3 +387,65 @@ async def run_benchmark(request: BenchmarkRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error running benchmark: {str(e)}")
+
+
+@app.post("/api/benchmark/run-once")
+async def run_single_benchmark(request: SingleBenchmarkRequest):
+    """Run a single timed analysis for one provider/model/context."""
+    try:
+        if not request.selected_file_ids:
+            raise HTTPException(status_code=400, detail="No files selected. Please select at least one dataset.")
+
+        # Fetch file records from database
+        all_files = await database.get_all_files()
+        selected_files = [
+            f for f in all_files
+            if f["id"] in request.selected_file_ids
+        ]
+
+        if not selected_files:
+            raise HTTPException(status_code=404, detail="Selected files not found")
+
+        # Validate files exist on disk
+        file_paths: list[str] = []
+        file_names: list[str] = []
+        for file_record in selected_files:
+            file_path = Path(file_record["file_path"])
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File {file_record['filename']} not found on disk")
+            file_paths.append(str(file_path))
+            file_names.append(file_record["filename"])
+
+        now = time.time()
+        analysis = await llm_analysis.run_timed_analysis(
+            analysis_type=request.analysis_type,
+            user_message=request.message,
+            file_paths=file_paths,
+            file_names=file_names,
+            provider=request.provider,
+            model=request.model,
+            context_mode=request.context_mode,
+        )
+
+        run = BenchmarkRun(
+            timestamp=now,
+            run_index=0,
+            analysis_type=analysis.get("analysis_type", request.analysis_type),
+            provider=analysis.get("provider", request.provider),
+            model=analysis.get("model", request.model),
+            context_mode=analysis.get("context_mode", request.context_mode),
+            latency_ms=float(analysis.get("latency_ms", 0.0)),
+            files_analyzed=analysis.get("files_analyzed", file_names),
+            response=analysis.get("response"),
+            code=analysis.get("code"),
+            code_explanation=analysis.get("code_explanation"),
+            data_output=analysis.get("data_output"),
+            code_success=analysis.get("code_success"),
+            code_error=analysis.get("code_error"),
+        )
+
+        return run.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running single benchmark: {str(e)}")

@@ -48,7 +48,8 @@ const MODEL_OPTIONS = [
 const CONTEXT_MODES = [
   { value: 'none', label: 'None' },
   { value: 'light', label: 'Light (schema + shapes)' },
-  { value: 'rich', label: 'Rich (schema + qualitative)' }
+  { value: 'rich', label: 'Rich (schema + qualitative)' },
+  { value: 'all', label: 'All (none + light + rich)' }
 ]
 
 export function BenchmarkPage() {
@@ -66,6 +67,33 @@ export function BenchmarkPage() {
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false)
 
   useEffect(() => {
+    // Hydrate benchmark UI state from localStorage if available
+    try {
+      const raw = window.localStorage.getItem('benchmark_state_v1')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed.message === 'string') setMessage(parsed.message)
+        if (parsed.analysisType === 'qualitative' || parsed.analysisType === 'quantitative') {
+          setAnalysisType(parsed.analysisType)
+        }
+        if (typeof parsed.runs === 'number' && parsed.runs >= 1) setRuns(parsed.runs)
+        if (parsed.contextMode && ['none', 'light', 'rich', 'all'].includes(parsed.contextMode)) {
+          setContextMode(parsed.contextMode)
+        }
+        if (Array.isArray(parsed.selectedModels)) {
+          setSelectedModels(new Set(parsed.selectedModels))
+        }
+        if (Array.isArray(parsed.results)) {
+          setResults(parsed.results)
+        }
+        if (parsed.manualRatings && typeof parsed.manualRatings === 'object') {
+          setManualRatings(parsed.manualRatings)
+        }
+      }
+    } catch {
+      // Ignore hydration errors and start fresh
+    }
+
     const fetchSelectedFiles = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/files/selected`)
@@ -82,6 +110,25 @@ export function BenchmarkPage() {
     fetchSelectedFiles()
   }, [])
 
+  // Persist benchmark UI state so it survives navigation
+  useEffect(() => {
+    try {
+      const plainSelectedModels = Array.from(selectedModels)
+      const state = {
+        message,
+        analysisType,
+        runs,
+        contextMode,
+        selectedModels: plainSelectedModels,
+        results,
+        manualRatings
+      }
+      window.localStorage.setItem('benchmark_state_v1', JSON.stringify(state))
+    } catch {
+      // Swallow persistence errors; app should still work
+    }
+  }, [message, analysisType, runs, contextMode, selectedModels, results, manualRatings])
+
   const selectedCount = files.length
 
   const toggleModel = (key) => {
@@ -97,11 +144,19 @@ export function BenchmarkPage() {
   }
 
   const selectedVariants = useMemo(() => {
-    return MODEL_OPTIONS.filter((opt) => selectedModels.has(`${opt.provider}:${opt.model}`)).map((opt) => ({
-      provider: opt.provider,
-      model: opt.model,
-      context_mode: contextMode
-    }))
+    const baseModels = MODEL_OPTIONS.filter((opt) => selectedModels.has(`${opt.provider}:${opt.model}`))
+    if (baseModels.length === 0) return []
+
+    // When "all" is selected, expand each model into three context variants
+    const modesToUse = contextMode === 'all' ? ['none', 'light', 'rich'] : [contextMode]
+
+    return baseModels.flatMap((opt) =>
+      modesToUse.map((mode) => ({
+        provider: opt.provider,
+        model: opt.model,
+        context_mode: mode
+      }))
+    )
   }, [selectedModels, contextMode])
 
   const selectedModelOptions = useMemo(
@@ -139,30 +194,56 @@ export function BenchmarkPage() {
     }
 
     setIsRunning(true)
+    setResults([])
     try {
-      const response = await fetch(`${API_BASE_URL}/api/benchmark`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          analysis_type: analysisType,
-          selected_file_ids: files.map((f) => f.id),
-          runs,
-          variants: selectedVariants
-        })
-      })
+      const payloads = []
+      const selectedFileIds = files.map((f) => f.id)
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
-        throw new Error(data.detail || 'Benchmark request failed')
+      for (const variant of selectedVariants) {
+        for (let runIndex = 0; runIndex < runs; runIndex += 1) {
+          payloads.push({
+            message,
+            analysis_type: analysisType,
+            selected_file_ids: selectedFileIds,
+            provider: variant.provider,
+            model: variant.model,
+            context_mode: variant.context_mode,
+            runIndex
+          })
+        }
       }
 
-      const data = await response.json()
-      const newResults = data.results ?? []
-      setResults(newResults)
+      await Promise.all(
+        payloads.map(async (payload) => {
+          try {
+            const { runIndex, ...body } = payload
+            const response = await fetch(`${API_BASE_URL}/api/benchmark/run-once`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            })
+
+            if (!response.ok) {
+              const data = await response.json().catch(() => ({}))
+              throw new Error(data.detail || 'Benchmark request failed')
+            }
+
+            const run = await response.json()
+            // Preserve the client-side run index for grouping/CSV
+            const enrichedRun = { ...run, run_index: runIndex }
+            setResults((prev) => [...prev, enrichedRun])
+          } catch (err) {
+            console.error('Error running benchmark variant:', err)
+            // Surface at least one error message
+            setError((prev) => prev || err.message || 'Failed to run benchmark.')
+          }
+        })
+      )
     } catch (err) {
       console.error('Error running benchmark:', err)
-      setError(err.message || 'Failed to run benchmark.')
+      if (!error) {
+        setError(err.message || 'Failed to run benchmark.')
+      }
     } finally {
       setIsRunning(false)
     }
