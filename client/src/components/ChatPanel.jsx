@@ -15,7 +15,9 @@ export function ChatPanel() {
     fetchSelectedFiles,
     handleSendMessage,
     provider,
-    setProvider
+    setProvider,
+    model,
+    setModel
   } = useChat()
 
   useEffect(() => {
@@ -67,17 +69,42 @@ export function ChatPanel() {
           </button>
         </div>
 
-        {/* Model provider selector */}
-        <div className="flex items-center gap-2 text-xs text-gray-600">
+        {/* Provider + model selector */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
           <span className="font-medium text-gray-700">Model</span>
           <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            value={`${provider}:${model}`}
+            onChange={(e) => {
+              const [nextProvider, nextModel] = e.target.value.split(':')
+              setProvider(nextProvider)
+              setModel(nextModel)
+            }}
             className="border border-gray-300 rounded-md bg-white px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-400"
           >
-            <option value="openai">OpenAI · gpt-4o-mini</option>
-            <option value="claude">Claude · Haiku 4.5</option>
-            <option value="gemini">Gemini · 3 Flash preview</option>
+            <optgroup label="OpenAI">
+              <option value="openai:gpt-5-mini-2025-08-07">GPT-5 mini · 2025‑08‑07 (cheapest)</option>
+              <option value="openai:gpt-5.4">GPT-5.4</option>
+            </optgroup>
+            <optgroup label="Claude">
+              <option value="claude:claude-haiku-4-5-20251001">Haiku 4.5</option>
+              <option value="claude:claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="claude:claude-opus-4-6">Opus 4.6</option>
+              <option value="claude:claude-sonnet-4-5-20250929">Sonnet 4.5</option>
+              <option value="claude:claude-opus-4-5-20251101">Opus 4.5</option>
+              <option value="claude:claude-opus-4-1-20250805">Opus 4.1</option>
+              <option value="claude:claude-sonnet-4-20250514">Sonnet 4</option>
+              <option value="claude:claude-opus-4-20250514">Opus 4</option>
+              <option value="claude:claude-3-haiku-20240307">Haiku 3 (deprecated)</option>
+            </optgroup>
+            <optgroup label="Gemini">
+              <option value="gemini:gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+              <option value="gemini:gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini:gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option value="gemini:gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+              <option value="gemini:gemini-3-flash">Gemini 3 Flash</option>
+              <option value="gemini:gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+              <option value="gemini:gemini-3.1-pro">Gemini 3.1 Pro</option>
+            </optgroup>
           </select>
         </div>
       </div>
