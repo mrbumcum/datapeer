@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 import os
 import csv
 from pathlib import Path
+from typing import Optional
 from pydantic import BaseModel
 from . import database
 from . import llm_analysis
@@ -19,8 +20,8 @@ class ChatMessage(BaseModel):
     message: str
     analysis_type: str  # 'qualitative' or 'quantitative'
     selected_file_ids: list[int] = []
-    provider: str | None = None
-    model: str | None = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 app = FastAPI()
 
