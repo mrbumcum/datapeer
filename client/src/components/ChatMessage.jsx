@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import robotIcon from '../assets/robot-svgrepo-com.svg'
 import userIcon from '../assets/user-svgrepo-com.svg'
 
@@ -21,9 +23,12 @@ export function ChatMessage({ message, isUser = false, isLoading = false }) {
               ? 'bg-purple-100 text-gray-800' 
               : 'bg-white text-gray-800'
           } shadow-sm`}>
-            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              className="prose prose-sm max-w-none whitespace-pre-wrap"
+            >
               {message}
-            </p>
+            </ReactMarkdown>
           </div>
         ) : (
           <div className="rounded-2xl px-4 py-3 bg-white shadow-sm">
