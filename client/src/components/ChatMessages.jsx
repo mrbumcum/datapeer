@@ -26,13 +26,19 @@ export function ChatMessages({ messages = [], isLoading = false }) {
           </div>
         ) : (
           <>
-            {messages.map((msg, index) => (
-              <ChatMessage 
-                key={index} 
-                message={msg.text || msg.content || msg} 
-                isUser={msg.isUser || msg.role === 'user'} 
-              />
-            ))}
+            {messages.map((msg, index) => {
+              const rawMessage = msg?.text ?? msg?.content ?? msg
+              const safeMessage =
+                typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage)
+
+              return (
+                <ChatMessage
+                  key={index}
+                  message={safeMessage}
+                  isUser={msg.isUser || msg.role === 'user'}
+                />
+              )
+            })}
             {isLoading && (
               <ChatMessage 
                 message="" 
