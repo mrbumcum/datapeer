@@ -354,19 +354,16 @@ Respond with ONLY the category word: "conversational", "preliminary", or "analys
         if client is None:
             return "analysis"
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You classify messages into 'conversational', 'preliminary', or 'analysis'. Respond with only one word.",
-                },
-                {"role": "user", "content": check_prompt},
-            ],
-            max_completion_tokens=15,
-        )
-
-        result = response.choices[0].message.content.strip().lower()
+        result = (
+            await complete_chat(
+                "openai",
+                system_prompt="You classify messages into 'conversational', 'preliminary', or 'analysis'. Respond with only one word.",
+                user_prompt=check_prompt,
+                model="gpt-4o-mini",
+                temperature=0.0,
+                max_tokens=15,
+            )
+        ).strip().lower()
         if "preliminary" in result:
             return "preliminary"
         elif "conversational" in result:
@@ -764,7 +761,7 @@ Keep responses focused on EDA insights (trends, comparisons, distributions)."""
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
-                max_completion_tokens=1800
+                max_tokens=1800
             )
             
             message = response.choices[0].message

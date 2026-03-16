@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Literal, Optional
 
@@ -114,10 +115,92 @@ def _normalize_model(provider: ProviderName, model: Optional[str]) -> str:
 def _ensure_openai_client():
     from openai import OpenAI
 
-    api_key = os.getenv("OPEN_AI_API_KEY")
+    api_key = (
+        os.getenv("OPEN_AI_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENAI_KEY")
+    )
     if not api_key:
-        raise ValueError("OPEN_AI_API_KEY environment variable is not set")
-    return OpenAI(api_key=api_key)
+        raise ValueError(
+            "OpenAI API key not set. Expected one of: OPEN_AI_API_KEY, OPENAI_API_KEY, OPENAI_KEY"
+        )
+
+    # Defensive cleanup for dotenv formats like KEY="...".
+    api_key = api_key.strip().strip('"').strip("'")
+
+    timeout_s = float(os.getenv("OPENAI_TIMEOUT_S", "60"))
+    max_retries = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+    return OpenAI(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
+
+
+def _openai_single_turn_text(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    """
+    Synchronous OpenAI call that returns plain text.
+    Uses the Responses API first (required for newer model families), and falls
+    back to Chat Completions for older models.
+    """
+    client = _ensure_openai_client()
+
+    def _supports_temperature(m: str) -> bool:
+        # Some models (notably GPT-5 family) currently only support the default
+        # temperature value. Passing anything else yields a 400.
+        m = (m or "").strip().lower()
+        if m.startswith("gpt-5"):
+            return False
+        return True
+
+    # Prefer Responses API (supports GPT-5 per OpenAI model docs).
+    try:
+        kwargs: dict = {}
+        if _supports_temperature(model) and temperature != 1:
+            kwargs["temperature"] = temperature
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_output_tokens=max_tokens,
+            **kwargs,
+        )
+        text = getattr(resp, "output_text", None)
+        if text is None:
+            # Some SDK versions return output via resp.output[*].content[*].text.
+            output = getattr(resp, "output", []) or []
+            parts: list[str] = []
+            for item in output:
+                for c in getattr(item, "content", []) or []:
+                    t = getattr(c, "text", None)
+                    if t:
+                        parts.append(t)
+            text = "\n".join(parts)
+        return (text or "").strip()
+    except Exception:
+        pass
+
+    # Fallback: Chat Completions API.
+    # Note: some newer OpenAI models reject `max_tokens` and require
+    # `max_completion_tokens` instead.
+    kwargs2: dict = {}
+    if _supports_temperature(model) and temperature != 1:
+        kwargs2["temperature"] = temperature
+    resp2 = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_completion_tokens=max_tokens,
+        **kwargs2,
+    )
+    return (resp2.choices[0].message.content or "").strip()
 
 
 def _ensure_claude_client():
@@ -157,16 +240,15 @@ async def complete_chat(
     resolved_model = _normalize_model(normalized, model)
 
     if normalized == "openai":
-        client = _ensure_openai_client()
-        response = client.chat.completions.create(
+        # Run the sync SDK call off the event loop to avoid "hanging" FastAPI.
+        return await asyncio.to_thread(
+            _openai_single_turn_text,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             model=resolved_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_completion_tokens=max_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
-        return response.choices[0].message.content or ""
 
     if normalized == "claude":
         client = _ensure_claude_client()
@@ -214,14 +296,12 @@ async def complete_chat(
         return "\n".join(parts).strip()
 
     # Fallback to OpenAI for any unexpected cases
-    client = _ensure_openai_client()
-    response = client.chat.completions.create(
+    return await asyncio.to_thread(
+        _openai_single_turn_text,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         model=_normalize_model("openai", model),
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_completion_tokens=max_tokens,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
-    return response.choices[0].message.content or ""
 
